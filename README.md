@@ -146,7 +146,7 @@ npm run dev            # http://localhost:5173/carovita/
 Altri comandi:
 
 ```bash
-npm test          # 45 test: invarianti di dominio + integrazione sui dati veri
+npm test          # 46 test: invarianti di dominio + integrazione sui dati veri
 npm run typecheck
 npm run backtest  # rigenera docs/BACKTEST.md
 npm run build
