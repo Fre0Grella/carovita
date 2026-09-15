@@ -231,13 +231,16 @@ export function buildRentSchedule(input: RentScheduleInput): RentYear[] {
               amount: (monthlyRent - before) * 12,
             });
           }
-        } else if (housing.cedolareSecca) {
+        } else if (housing.cedolareSecca && h === 1) {
+          // Una volta sola: ripeterlo a ogni anno seppellirebbe gli eventi
+          // che contano davvero, come il riallineamento a fine contratto.
           events.push({
             year,
             kind: 'note',
             message:
-              'Cedolare secca: il canone resta fermo in termini nominali, ' +
-              'quindi ogni anno cala in termini reali.',
+              'Cedolare secca: per tutta la durata del contratto il canone ' +
+              'resta fermo in euro, quindi ogni anno pesa un po’ meno ' +
+              'in termini reali.',
           });
         }
       }

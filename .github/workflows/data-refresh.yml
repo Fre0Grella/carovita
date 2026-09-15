@@ -1,0 +1,90 @@
+# Aggiornamento periodico dei dati.
+#
+# Scarica gli indici da Eurostat e ISTAT, rigenera lo snapshot e rilancia il
+# backtest, poi committa il risultato. Il deploy su Pages parte da solo, perché
+# si attiva a ogni push su main.
+#
+# Nota sulla tolleranza ai guasti: una corsa "degradata" (una fonte non ha
+# risposto e si sono riusati i valori precedenti) NON deve far fallire il
+# workflow. Lo snapshot resta valido e segnala il problema da sé: far fallire
+# la corsa significherebbe soltanto smettere di aggiornare anche tutto il
+# resto. Il job fallisce solo se manca un dato indispensabile e non esiste
+# nemmeno uno snapshot precedente da cui ripartire.
+
+name: Aggiorna i dati
+
+on:
+  schedule:
+    # L'HICP esce a metà mese: si controlla il 18 e il 3, alle 5:30 UTC.
+    - cron: '30 5 18 * *'
+    - cron: '30 5 3 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: data-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Scarica gli indici dei prezzi
+        run: npm run data:refresh
+
+      - name: Rigenera il backtest
+        run: npm run backtest
+
+      - name: Verifica che il risultato sia utilizzabile
+        run: npm test
+
+      - name: Committa se qualcosa è cambiato
+        run: |
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if git diff --quiet -- public/data docs/BACKTEST.md; then
+            echo 'Nessuna variazione nei dati: niente da committare.'
+            exit 0
+          fi
+          VINTAGE=$(node -p "require('./public/data/snapshot.json').series.headline.vintage")
+          DEGRADED=$(node -p "require('./public/data/snapshot.json').degraded")
+          if [ "$DEGRADED" = "true" ]; then
+            SUFFIX=' (corsa parziale)'
+          else
+            SUFFIX=''
+          fi
+          git add public/data docs/BACKTEST.md
+          git commit -m "Dati aggiornati a ${VINTAGE}${SUFFIX}"
+          git push
+
+      - name: Riepilogo
+        if: always()
+        run: |
+          node -e "
+            const s = require('./public/data/snapshot.json');
+            const l = [];
+            l.push('## Aggiornamento dati');
+            l.push('');
+            l.push('- Generato: ' + s.generatedAt);
+            l.push('- Serie: ' + Object.keys(s.series).length);
+            l.push('- Indice generale fino a: ' + s.series.headline.vintage);
+            l.push('- FOI: ' + (s.foi ? s.foi.vintage : 'non disponibile'));
+            l.push('- Stato: ' + (s.degraded ? 'PARZIALE' : 'completo'));
+            if (s.warnings.length) {
+              l.push('');
+              l.push('### Avvisi');
+              for (const w of s.warnings) l.push('- ' + w);
+            }
+            require('fs').appendFileSync(process.env.GITHUB_STEP_SUMMARY, l.join('\n'));
+          "
