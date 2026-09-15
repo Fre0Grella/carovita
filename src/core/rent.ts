@@ -124,6 +124,12 @@ export interface RentScheduleInput {
    * `horizon + 1` (l'indice 0, anno base, non viene usato).
    */
   foiRates: number[];
+  /**
+   * Indice cumulato dei costi di manutenzione dell'abitazione, lungo
+   * `horizon + 1`. Indicizza le spese condominiali, che non sono ferme in
+   * termini nominali: seguono i prezzi di manutenzione, pulizie e servizi.
+   */
+  condoIndex: number[];
 }
 
 /**
@@ -135,13 +141,20 @@ export interface RentScheduleInput {
  * lo scatto ISTAT (che scatta all'anniversario successivo).
  */
 export function buildRentSchedule(input: RentScheduleInput): RentYear[] {
-  const { housing, initialMonthlyRent, baseYear, horizon, marketIndex, foiRates } =
-    input;
+  const {
+    housing,
+    initialMonthlyRent,
+    baseYear,
+    horizon,
+    marketIndex,
+    foiRates,
+    condoIndex,
+  } = input;
   const out: RentYear[] = [];
 
   if (housing.contractType === 'proprieta') {
     for (let h = 0; h <= horizon; h++) {
-      const condo = housing.condoFees * 12;
+      const condo = housing.condoFees * 12 * (condoIndex[h] ?? 1);
       out.push({
         year: baseYear + h,
         monthlyRent: 0,
@@ -250,7 +263,7 @@ export function buildRentSchedule(input: RentScheduleInput): RentYear[] {
       });
     }
 
-    const condo = housing.condoFees * 12;
+    const condo = housing.condoFees * 12 * (condoIndex[h] ?? 1);
     const marketRent = (initialMonthlyRent * marketIndex[h]!) / marketIndex[0]!;
 
     out.push({

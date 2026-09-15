@@ -138,9 +138,9 @@ async function main(): Promise<void> {
   lines.push('');
   lines.push(
     '| Orizzonte | MAE modello | MAE RW | MAE ancora | Mediana modello | ' +
-      'Mediana RW | Copertura banda 80% |',
+      'Mediana RW | Copertura tasso | **Copertura livello** | Errore livello |',
   );
-  lines.push('|---:|---:|---:|---:|---:|---:|---:|');
+  lines.push('|---:|---:|---:|---:|---:|---:|---:|---:|---:|');
   for (let h = 1; h <= DEFAULT_BACKTEST.maxHorizon; h++) {
     const rows = results
       .map((r) => r.horizons.find((x) => x.horizon === h))
@@ -157,15 +157,48 @@ async function main(): Promise<void> {
       `| ${h} ${h > 1 ? 'anni' : 'anno'} | ${pp(avg((x) => x.maeModel))} | ` +
         `${pp(avg((x) => x.maeRandomWalk))} | ${pp(avg((x) => x.maeAnchor))} | ` +
         `${pp(med((x) => x.maeModel))} | ${pp(med((x) => x.maeRandomWalk))} | ` +
-        `${pp(avg((x) => x.coverage))}% |`,
+        `${pp(avg((x) => x.coverageRate))}% | ` +
+        `**${pp(avg((x) => x.coverageLevel))}%** | ` +
+        `${pp(avg((x) => x.maeLevel))}% |`,
     );
   }
   lines.push('');
   lines.push(
-    'La colonna "copertura" indica la quota di casi in cui il valore reale ' +
-      'è caduto nella banda di confidenza dichiarata all’80%. Un ' +
-      'modello ben calibrato sta vicino a 80: molto sotto significa bande ' +
-      'troppo strette (falsa sicurezza), molto sopra bande troppo larghe.',
+    'Le colonne di copertura indicano la quota di casi in cui il valore reale ' +
+      'è caduto nella banda dichiarata all’80%. Un modello ben ' +
+      'calibrato sta vicino a 80: molto sotto significa bande troppo strette ' +
+      '(falsa sicurezza), molto sopra bande troppo larghe.',
+  );
+  lines.push('');
+  lines.push(
+    'Le due colonne misurano cose diverse, ed è la seconda quella che ' +
+      'conta per chi guarda i grafici. **Copertura tasso** valida la banda ' +
+      'sul tasso di inflazione annuo. **Copertura livello** valida la banda ' +
+      'sul livello cumulato della spesa, che è la fascia effettivamente ' +
+      'disegnata nell’applicazione: sono grandezze con varianze diverse, ' +
+      'e una banda ben calibrata sul tasso può essere mal calibrata sul ' +
+      'livello. **Errore livello** è lo scarto percentuale medio fra la ' +
+      'spesa cumulata prevista e quella realizzata.',
+  );
+  lines.push('');
+  lines.push('### Limite noto: le bande a lungo termine sono ottimistiche');
+  lines.push('');
+  lines.push(
+    'La copertura sul livello è vicina al valore dichiarato nei primi ' +
+      'due-tre anni, poi scende. Tradotto: **la banda a dieci anni è ' +
+      'troppo stretta**, e l’incertezza reale su quell’orizzonte ' +
+      'è maggiore di quella disegnata.',
+  );
+  lines.push('');
+  lines.push(
+    'La ragione è strutturale e non si elimina con un modello di questa ' +
+      'famiglia: in trent’anni l’Italia è passata per il ' +
+      'cambio all’euro, la crisi del 2008 e lo shock energetico del ' +
+      '2022. Sono rotture di regime, non estrazioni da una distribuzione ' +
+      'stabile, e nessuna stima basata sulla volatilità passata le ' +
+      'anticipa. Il numero è riportato qui invece che nascosto proprio ' +
+      'perché chi legge una proiezione a dieci anni sappia quanto ' +
+      'fidarsi della fascia grigia.',
   );
   lines.push('');
 

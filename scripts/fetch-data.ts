@@ -48,7 +48,14 @@ import type {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
 const OUT_PATH = resolve(ROOT, 'public/data/snapshot.json');
-const CITIES_PATH = resolve(ROOT, 'src/data/cities.json');
+const CITIES_SRC = resolve(ROOT, 'src/data/cities.json');
+/**
+ * I comuni viaggiano in un file separato: sono quasi 3 MB contro i ~250 KB
+ * delle serie storiche, e servono solo quando l'utente apre il selettore
+ * della citta'. Tenerli nello snapshot obbligherebbe a scaricarli all'avvio
+ * per poi non usarli quasi mai.
+ */
+const CITIES_OUT = resolve(ROOT, 'public/data/cities.json');
 
 const SCHEMA_VERSION = 1;
 
@@ -438,7 +445,8 @@ async function main(): Promise<void> {
     degraded = true;
   }
 
-  const cities = JSON.parse(await readFile(CITIES_PATH, 'utf8')) as unknown[];
+  const citiesRaw = await readFile(CITIES_SRC, 'utf8');
+  const cities = JSON.parse(citiesRaw) as unknown[];
 
   const snapshot: DataSnapshot = {
     schemaVersion: SCHEMA_VERSION,
@@ -447,12 +455,14 @@ async function main(): Promise<void> {
     warnings,
     series,
     ...(foi ? { foi } : {}),
-    cities: cities as DataSnapshot['cities'],
+    // Lo snapshot non porta i comuni: si caricano a parte, su richiesta.
+    cities: [],
     longRunAnchor: LONG_RUN_ANCHOR,
   };
 
   await mkdir(dirname(OUT_PATH), { recursive: true });
   await writeFile(OUT_PATH, JSON.stringify(snapshot), 'utf8');
+  await writeFile(CITIES_OUT, citiesRaw, 'utf8');
 
   const bytes = JSON.stringify(snapshot).length;
   console.log(

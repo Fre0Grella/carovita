@@ -87,6 +87,24 @@ export function annualInflation(obs: MonthlyObs[]): Map<number, number> {
   return out;
 }
 
+/**
+ * Tendenziale annuo di dicembre, per ogni anno in cui è calcolabile.
+ *
+ * È questa la definizione su cui lavora il modello, non la media annua: la
+ * previsione parte dall'ultimo tendenziale disponibile, quindi stima,
+ * innesco e validazione devono usare tutti la stessa grandezza. Stimare i
+ * parametri sulle medie annue (più lisce) e poi innescare la ricorsione con
+ * un tendenziale puntuale (più rumoroso) sottostima gli shock e produce
+ * bande di incertezza troppo strette.
+ */
+export function decemberInflation(obs: MonthlyObs[]): Map<number, number> {
+  const out = new Map<number, number>();
+  for (const r of yoyRates(obs)) {
+    if (r.t.endsWith('-12')) out.set(yearOf(r.t), r.v);
+  }
+  return out;
+}
+
 /** Ultimo tendenziale annuo disponibile, in frazione. */
 export function latestYoY(obs: MonthlyObs[]): number | null {
   const rates = yoyRates(obs);

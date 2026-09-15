@@ -7,6 +7,20 @@
  * 1..H anni e si confronta con quello che è poi realmente successo. I
  * parametri non vedono mai il futuro, quindi l'errore misurato è onesto.
  *
+ * ## Due regole che questo backtest rispetta, e che è facile violare
+ *
+ * 1. **Si parte dallo stesso numero della produzione.** Il modello in
+ *    esercizio innesca la ricorsione con l'ultimo tendenziale disponibile
+ *    (`latestYoY`), non con la media annua. Se il backtest partisse dalla
+ *    media annua misurerebbe una configurazione diversa da quella spedita,
+ *    proprio nel termine che domina a un anno.
+ *
+ * 2. **Si valida la grandezza che si mostra a schermo.** Il grafico non
+ *    disegna il tasso annuo: disegna il *livello cumulato* della spesa con
+ *    la sua banda. Sono due quantità con varianze diverse. Per questo qui si
+ *    misurano entrambe le coperture, e nel rapporto compare anche quella sul
+ *    livello, che è la sola che dica qualcosa sulle bande viste dall'utente.
+ *
  * Il confronto è contro due riferimenti ("naive benchmark"):
  *
  *  - **random walk**: "l'inflazione del prossimo anno sarà uguale a quella di
@@ -14,16 +28,11 @@
  *    sorprendentemente difficile da battere.
  *  - **ancora fissa**: "l'inflazione sarà sempre il 2%". Su orizzonti lunghi
  *    è forte, perché l'inflazione effettivamente ritorna verso il target.
- *
- * Il modello a ritorno verso la media dovrebbe stare vicino al random walk a
- * 1 anno e batterlo nettamente a 5-10 anni. Se non lo fa, il modello non
- * serve e va cambiato: per questo il backtest è eseguibile con `npm run
- * backtest` e i risultati sono committati in `docs/BACKTEST.md`.
  */
 
-import { estimateCategoryModel } from './model.js';
-import { annualInflation } from './series.js';
-import type { CategoryId, IndexSeries } from './types.js';
+import { estimateCategoryModel, forecastRate, uncertaintyBand } from './model.js';
+import { latestYoY, normInv, yoyRates } from './series.js';
+import type { CategoryId, IndexSeries, MonthlyObs } from './types.js';
 
 export interface HorizonError {
   horizon: number;
@@ -38,26 +47,32 @@ export interface HorizonError {
   /** Numero di confronti effettuati. */
   n: number;
   /**
-   * Quota di osservazioni cadute dentro la banda di confidenza dichiarata.
+   * Quota di tassi annui realizzati caduti nella banda dichiarata.
    * Con confidenza 0.8 un modello ben calibrato sta intorno a 0.8.
    */
-  coverage: number;
+  coverageRate: number;
+  /**
+   * Quota di *livelli cumulati* realizzati caduti nella banda dichiarata.
+   * È la copertura delle bande effettivamente disegnate nei grafici.
+   */
+  coverageLevel: number;
+  /**
+   * Errore assoluto medio sul livello cumulato a orizzonte h, in frazione
+   * (0.05 = 5% di scarto sulla spesa cumulata prevista).
+   */
+  maeLevel: number;
 }
 
 export interface CategoryBacktest {
   category: CategoryId;
   label: string;
   horizons: HorizonError[];
-  /** Media su tutti gli orizzonti dell'errore del modello. */
   meanMae: number;
-  /** Media su tutti gli orizzonti dell'errore del random walk. */
   meanMaeRandomWalk: number;
-  /** Media su tutti gli orizzonti dell'errore dell'ancora fissa. */
   meanMaeAnchor: number;
 }
 
 export interface BacktestOptions {
-  /** Orizzonte massimo in anni. */
   maxHorizon: number;
   /** Anni minimi di storia richiesti per stimare i parametri. */
   minTrainYears: number;
@@ -82,67 +97,120 @@ function truncate(series: IndexSeries, lastYear: number): IndexSeries {
   };
 }
 
+/** Valore dell'indice a dicembre dell'anno indicato, se presente. */
+function december(obs: MonthlyObs[], year: number): number | undefined {
+  return obs.find((o) => o.t === `${year}-12`)?.v;
+}
+
+/** Tendenziale annuo a dicembre dell'anno indicato, se calcolabile. */
+function decemberYoY(obs: MonthlyObs[], year: number): number | undefined {
+  return yoyRates(obs).find((o) => o.t === `${year}-12`)?.v;
+}
+
 /**
  * Esegue il backtest walk-forward su una categoria.
  *
- * Per ogni anno di origine `T` (dopo `minTrainYears` di storia) e per ogni
- * orizzonte `h`, si confronta la previsione fatta in `T` per l'anno `T+h`
- * con l'inflazione effettivamente realizzata in `T+h`.
+ * Tutte le grandezze sono definite su base dicembre, coerentemente con il
+ * fatto che la produzione innesca la previsione con l'ultimo tendenziale
+ * disponibile.
  */
 export function backtestCategory(
   series: IndexSeries,
   headline: IndexSeries,
   opts: BacktestOptions = DEFAULT_BACKTEST,
 ): CategoryBacktest {
-  const realized = annualInflation(series.obs);
-  const years = [...realized.keys()].sort((a, b) => a - b);
+  const years = [
+    ...new Set(series.obs.map((o) => Number(o.t.slice(0, 4)))),
+  ].sort((a, b) => a - b);
   const firstYear = years[0];
   const lastYear = years[years.length - 1];
 
   const acc = new Map<
     number,
-    { model: number[]; rw: number[]; anchor: number[]; inBand: number[] }
+    {
+      model: number[];
+      rw: number[];
+      anchor: number[];
+      inBandRate: number[];
+      inBandLevel: number[];
+      levelErr: number[];
+    }
   >();
   for (let h = 1; h <= opts.maxHorizon; h++) {
-    acc.set(h, { model: [], rw: [], anchor: [], inBand: [] });
+    acc.set(h, {
+      model: [],
+      rw: [],
+      anchor: [],
+      inBandRate: [],
+      inBandLevel: [],
+      levelErr: [],
+    });
   }
 
   if (firstYear === undefined || lastYear === undefined) {
     return emptyResult(series);
   }
 
+  const z = normInv(0.5 + opts.confidence / 2);
+
   for (
     let origin = firstYear + opts.minTrainYears;
     origin <= lastYear;
     origin++
   ) {
-    // Stima con i soli dati disponibili fino a `origin` compreso.
     const trainCat = truncate(series, origin);
     const trainHead = truncate(headline, origin);
-    if (annualInflation(trainCat.obs).size < opts.minTrainYears) continue;
 
-    const model = estimateCategoryModel(trainCat, trainHead);
-    const lastObserved = annualInflation(trainCat.obs).get(origin);
-    if (lastObserved === undefined) continue;
+    // Stessa definizione della produzione: ultimo tendenziale disponibile.
+    const lastObserved = latestYoY(trainCat.obs);
+    const baseLevel = december(trainCat.obs, origin);
+    if (lastObserved === null || baseLevel === undefined) continue;
 
-    const mu = opts.anchor + model.spread;
+    const model = {
+      ...estimateCategoryModel(trainCat, trainHead),
+      lastRate: lastObserved,
+    };
+    if (model.nObs < opts.minTrainYears - 2) continue;
+
+    // Livello cumulato previsto, costruito esattamente come in produzione.
+    let predictedLevel = 1;
 
     for (let h = 1; h <= opts.maxHorizon; h++) {
-      const target = realized.get(origin + h);
-      if (target === undefined) continue;
+      const rate = forecastRate(model, opts.anchor, h).total;
+      predictedLevel *= 1 + rate;
 
-      const predicted = mu + Math.pow(model.phi, h) * (lastObserved - mu);
+      const targetYear = origin + h;
+      const realizedRate = decemberYoY(series.obs, targetYear);
+      const targetLevel = december(series.obs, targetYear);
+      if (realizedRate === undefined || targetLevel === undefined) continue;
+
       const bucket = acc.get(h)!;
-      bucket.model.push(predicted - target);
-      bucket.rw.push(lastObserved - target);
-      bucket.anchor.push(opts.anchor - target);
 
-      // Calibrazione: il tasso realizzato cade nella banda prevista?
-      // La banda a h anni sul tasso annuo ha ampiezza sigma * z * sqrt(h)
-      // sotto ipotesi di shock indipendenti.
-      const z = 1.2815515655446004; // quantile 0.9 della normale standard
-      const halfWidth = model.sigma * z * Math.sqrt(h);
-      bucket.inBand.push(Math.abs(predicted - target) <= halfWidth ? 1 : 0);
+      // --- errore sul tasso annuo ---
+      bucket.model.push(rate - realizedRate);
+      bucket.rw.push(lastObserved - realizedRate);
+      bucket.anchor.push(opts.anchor - realizedRate);
+
+      // Banda sul tasso: varianza h-passi di un AR(1) stazionario.
+      const phi = model.phi;
+      const rateSd =
+        Math.abs(1 - phi * phi) < 1e-9
+          ? model.sigma * Math.sqrt(h)
+          : model.sigma *
+            Math.sqrt((1 - Math.pow(phi, 2 * h)) / (1 - phi * phi));
+      bucket.inBandRate.push(
+        Math.abs(rate - realizedRate) <= rateSd * z ? 1 : 0,
+      );
+
+      // --- errore sul livello cumulato (la grandezza disegnata) ---
+      const realizedLevel = targetLevel / baseLevel;
+      const band = uncertaintyBand(model, h, opts.confidence);
+      const lo = predictedLevel * band.lo;
+      const hi = predictedLevel * band.hi;
+      bucket.inBandLevel.push(
+        realizedLevel >= lo && realizedLevel <= hi ? 1 : 0,
+      );
+      bucket.levelErr.push(Math.abs(predictedLevel / realizedLevel - 1));
     }
   }
 
@@ -157,7 +225,9 @@ export function backtestCategory(
       maeAnchor: mae(b.anchor),
       biasModel: avg(b.model),
       n: b.model.length,
-      coverage: avg(b.inBand),
+      coverageRate: avg(b.inBandRate),
+      coverageLevel: avg(b.inBandLevel),
+      maeLevel: avg(b.levelErr),
     });
   }
 

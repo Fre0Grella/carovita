@@ -94,6 +94,13 @@ export function project(
     foiRates.push(forecastRate(foiModel, anchor, h).total);
   }
 
+  // Le spese condominiali seguono i prezzi di manutenzione dell'abitazione,
+  // non restano ferme in termini nominali.
+  const condoModel = modelFor(models, 'maintenance') ?? headlineModel;
+  const condoIndex = cumulativeIndex(condoModel, anchor, horizon).map(
+    (p) => p.level,
+  );
+
   // --- Abitazione -----------------------------------------------------------
   const initialRent = resolveInitialRent(profile, snapshot, warnings);
   const rentSchedule = buildRentSchedule({
@@ -103,10 +110,26 @@ export function project(
     horizon,
     marketIndex,
     foiRates,
+    condoIndex,
   });
 
   // --- Voci di spesa ordinarie ---------------------------------------------
   const items: ExpenseItem[] = [...profile.utilities, ...profile.expenses];
+
+  // L'indice cumulato dipende solo dalla categoria, non dall'anno: si calcola
+  // una volta sola per categoria invece che a ogni iterazione del ciclo.
+  const pathByCategory = new Map<string, ReturnType<typeof cumulativeIndex>>();
+  for (const item of items) {
+    if (pathByCategory.has(item.category)) continue;
+    const model = modelFor(models, item.category) ?? headlineModel;
+    if (!modelFor(models, item.category)) {
+      const msg =
+        `Serie non disponibile per la categoria "${item.category}": ` +
+        'uso l’indice generale.';
+      if (!warnings.includes(msg)) warnings.push(msg);
+    }
+    pathByCategory.set(item.category, cumulativeIndex(model, anchor, horizon));
+  }
 
   const years: YearProjection[] = [];
   let wealth = profile.initialSavings;
@@ -121,21 +144,30 @@ export function project(
     const rentYear = rentSchedule[h]!;
     if (rentYear.total > 0) {
       const contractual = rentYear.total;
-      // Controfattuale: quanto costerebbe seguendo semplicemente il mercato.
-      const naive =
+      const base0 = rentSchedule[0]!;
+
+      // Controfattuale: il solo canone segue il mercato, mentre le spese
+      // accessorie (condominio, imposte) seguono le proprie regole. Mescolarle
+      // attribuirebbe al "mercato degli affitti" anche la crescita delle
+      // spese condominiali, falsando l'attribuzione.
+      const naiveRent =
         h === 0
-          ? contractual
-          : (rentSchedule[0]!.total * marketIndex[h]!) / marketIndex[0]!;
+          ? base0.annualRent
+          : (base0.annualRent * marketIndex[h]!) / marketIndex[0]!;
+      const ancillary = rentYear.condoFees + rentYear.registrationTax + rentYear.stampDuty;
+      const naive = naiveRent + ancillary;
+
       const rentBand = uncertaintyBand(rentModel, h, confidence);
       const rentDecomp = h === 0 ? zeroRate() : rentPath[h]!.rate;
       const split = splitAttribution(
-        rentSchedule[0]!.total,
+        base0.annualRent + base0.condoFees + base0.registrationTax + base0.stampDuty,
         naive,
         rentDecomp,
         h,
         0,
       );
-      // Tutto lo scarto fra mercato e contratto e' effetto contrattuale.
+      // Lo scarto residuo fra canone di mercato e canone contrattuale e'
+      // l'effetto delle regole del contratto.
       split.fromContract = contractual - naive;
 
       categories.push({
@@ -154,11 +186,7 @@ export function project(
     // Tutte le altre voci.
     for (const item of items) {
       const model = modelFor(models, item.category) ?? headlineModel;
-      if (!modelFor(models, item.category)) {
-        const msg = `Serie non disponibile per "${item.label}": uso l’indice generale.`;
-        if (!warnings.includes(msg)) warnings.push(msg);
-      }
-      const path = cumulativeIndex(model, anchor, horizon);
+      const path = pathByCategory.get(item.category)!;
       const base = item.monthlyAmount * 12;
       const realFactor = Math.pow(1 + item.realGrowth, h);
       const nominal = base * path[h]!.level * realFactor;

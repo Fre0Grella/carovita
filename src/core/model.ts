@@ -41,8 +41,8 @@
  */
 
 import {
-  annualInflation,
   clamp,
+  decemberInflation,
   latestYoY,
   mean,
   normInv,
@@ -91,8 +91,9 @@ export function estimateCategoryModel(
   series: IndexSeries,
   headline: IndexSeries,
 ): CategoryModel {
-  const catInfl = annualInflation(series.obs);
-  const headInfl = annualInflation(headline.obs);
+  // Tendenziali di dicembre: stessa grandezza che innesca la previsione.
+  const catInfl = decemberInflation(series.obs);
+  const headInfl = decemberInflation(headline.obs);
 
   // Differenziale storico medio rispetto all'indice generale, calcolato solo
   // sugli anni presenti in entrambe le serie.
@@ -172,6 +173,31 @@ export function estimateCategoryModel(
 
   const lastRate = latestYoY(series.obs) ?? catMean;
 
+  // Incertezza sulla media di lungo periodo della categoria. A differenza
+  // degli shock annui, che si smorzano, un errore sull'ancora si accumula
+  // linearmente con l'orizzonte: se l'inflazione media dei prossimi dieci
+  // anni fosse 3% invece di 2%, lo scarto sul livello sarebbe del 10%, non
+  // del 3%. Ignorarla e' la ragione principale per cui le bande a lungo
+  // termine risultano troppo strette.
+  //
+  // L'errore standard non e' pero' sd/sqrt(n): i tassi di inflazione annui
+  // sono fortemente autocorrelati, e trattarli come indipendenti sovrastima
+  // di molto la precisione con cui conosciamo la media. Si usa quindi la
+  // numerosita' campionaria efficace di Bartlett,
+  //
+  //     n_eff = n * (1 - rho) / (1 + rho)
+  //
+  // con rho approssimato dalla persistenza gia' stimata. Con phi = 0.5 la
+  // numerosita' efficace e' un terzo di quella nominale, e l'incertezza
+  // sull'ancora cresce di circa il 70%.
+  const rates = [...catInfl.values()];
+  const nEff = Math.max(
+    2,
+    (rates.length * (1 - phi)) / (1 + phi),
+  );
+  const sigmaAnchor =
+    rates.length > 1 ? stdev(rates) / Math.sqrt(nEff) : 0.005;
+
   return {
     category: series.category,
     label: series.label,
@@ -179,6 +205,7 @@ export function estimateCategoryModel(
     spread,
     lastRate,
     sigma,
+    sigmaAnchor,
     nObs: x.length,
     vintage: series.vintage,
     datasetId: series.datasetId,
@@ -259,7 +286,10 @@ export function cumulativeSigma(model: CategoryModel, h: number): number {
       Math.abs(1 - phi) < 1e-9 ? steps : (1 - Math.pow(phi, steps)) / (1 - phi);
     varSum += weight * weight;
   }
-  return model.sigma * Math.sqrt(varSum);
+  const shockVar = model.sigma * model.sigma * varSum;
+  // L'errore sull'ancora non si smorza: entra con peso h su tutti gli anni.
+  const anchorVar = Math.pow(model.sigmaAnchor * h, 2);
+  return Math.sqrt(shockVar + anchorVar);
 }
 
 /**
@@ -272,9 +302,29 @@ export function uncertaintyBand(
   h: number,
   confidence: number,
 ): { lo: number; hi: number } {
-  const z = normInv(0.5 + confidence / 2);
-  const s = cumulativeSigma(model, h) * z;
+  const q = studentQuantile(0.5 + confidence / 2, Math.max(model.nObs - 2, 3));
+  const s = cumulativeSigma(model, h) * q;
   return { lo: Math.exp(-s), hi: Math.exp(s) };
+}
+
+/**
+ * Quantile della t di Student con `df` gradi di liberta'.
+ *
+ * Si usa la t invece della normale perche' i parametri sono stimati su poche
+ * decine di osservazioni e l'inflazione ha code piu' spesse di una gaussiana:
+ * gli shock energetici del 2022 non sono eventi "da normale". La t allarga le
+ * code in modo controllato e, al crescere di `df`, ritorna alla normale.
+ *
+ * Approssimazione di Cornish-Fisher, accurata a sufficienza per bande di
+ * confidenza e senza dipendenze esterne.
+ */
+export function studentQuantile(p: number, df: number): number {
+  const z = normInv(p);
+  const z2 = z * z;
+  const g1 = (z2 * z + z) / 4;
+  const g2 = (5 * z2 * z2 * z + 16 * z2 * z + 3 * z) / 96;
+  const g3 = (3 * z2 * z2 * z2 * z + 19 * z2 * z2 * z + 17 * z2 * z - 15 * z) / 384;
+  return z + g1 / df + g2 / (df * df) + g3 / (df * df * df);
 }
 
 /**

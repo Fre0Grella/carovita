@@ -248,6 +248,7 @@ describe('model', () => {
 describe('rent', () => {
   const marketIndex = Array.from({ length: 21 }, (_, h) => Math.pow(1.03, h));
   const foiRates = Array.from({ length: 21 }, () => 0.02);
+  const condoIndex = Array.from({ length: 21 }, () => 1);
 
   it('applica al massimo il 75% della variazione FOI', () => {
     const sched = buildRentSchedule({
@@ -257,6 +258,7 @@ describe('rent', () => {
       horizon: 1,
       marketIndex,
       foiRates,
+      condoIndex,
     });
     // 2% di FOI -> 1.5% di aumento del canone.
     const expected = 1000 * (1 + ISTAT_INDEXATION_CAP * 0.02);
@@ -271,6 +273,7 @@ describe('rent', () => {
       horizon: 5,
       marketIndex,
       foiRates,
+      condoIndex,
     });
     for (const y of sched) {
       expect(y.monthlyRent).toBeCloseTo(1000, 6);
@@ -287,6 +290,7 @@ describe('rent', () => {
       horizon: 4,
       marketIndex,
       foiRates,
+      condoIndex,
     });
     expect(sched[4]!.monthlyRent).toBeCloseTo(900, 6);
   });
@@ -299,6 +303,7 @@ describe('rent', () => {
       horizon: 10,
       marketIndex,
       foiRates,
+      condoIndex,
     });
     // Il ciclo 4+4 dura 8 anni: il salto avviene all'ottavo.
     const jump = sched[8]!;
@@ -317,6 +322,7 @@ describe('rent', () => {
       horizon: 6,
       marketIndex,
       foiRates,
+      condoIndex,
     });
     expect(sched[6]!.monthlyRent).toBeLessThan(1000 * Math.pow(1.03, 6));
     expect(sched[6]!.monthlyRent).toBeGreaterThan(1000);
@@ -372,10 +378,26 @@ describe('rent', () => {
       horizon: 3,
       marketIndex,
       foiRates,
+      condoIndex,
     });
     expect(sched[3]!.annualRent).toBe(0);
     expect(sched[3]!.registrationTax).toBe(0);
     expect(sched[3]!.total).toBeCloseTo(1200, 6);
+  });
+
+  it('indicizza le spese condominiali invece di tenerle ferme', () => {
+    const growing = Array.from({ length: 21 }, (_, h) => Math.pow(1.02, h));
+    const sched = buildRentSchedule({
+      housing: { ...baseHousing, condoFees: 100 },
+      initialMonthlyRent: 1000,
+      baseYear: 2026,
+      horizon: 10,
+      marketIndex,
+      foiRates,
+      condoIndex: growing,
+    });
+    expect(sched[0]!.condoFees).toBeCloseTo(1200, 6);
+    expect(sched[10]!.condoFees).toBeCloseTo(1200 * Math.pow(1.02, 10), 6);
   });
 
   it('conosce la durata dei contratti tipici', () => {

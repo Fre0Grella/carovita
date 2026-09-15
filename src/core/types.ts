@@ -242,6 +242,11 @@ export interface CategoryModel {
   lastRate: number;
   /** Deviazione standard dei residui a 1 anno, in frazione. */
   sigma: number;
+  /**
+   * Incertezza sulla media di lungo periodo della categoria, in frazione
+   * annua. Si accumula linearmente con l'orizzonte.
+   */
+  sigmaAnchor: number;
   /** Numero di osservazioni annue usate per la stima. */
   nObs: number;
   vintage: string;
