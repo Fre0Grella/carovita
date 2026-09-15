@@ -15,7 +15,10 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { project, summarize } from '../src/core/project.js';
-import { estimateAllModels } from '../src/core/model.js';
+import {
+  averageCategoryCorrelation,
+  estimateAllModels,
+} from '../src/core/model.js';
 import { annualInflation, decemberInflation } from '../src/core/series.js';
 import type { DataSnapshot } from '../src/core/types.js';
 import { makeDefaultProfile } from '../src/ui/defaults.js';
@@ -186,6 +189,42 @@ d('snapshot reale', () => {
     const a = conIndicizzazione.years.reduce((s, y) => s + y.totalNominal, 0);
     const b = conCedolare.years.reduce((s, y) => s + y.totalNominal, 0);
     expect(b).toBeLessThan(a);
+  });
+
+  it('le categorie non sono perfettamente correlate', () => {
+    // Se lo fossero, sommare gli estremi delle bande sarebbe corretto. Non lo
+    // sono: energia, abbigliamento e telefonia seguono strade diverse.
+    const rho = averageCategoryCorrelation(snapshot!);
+    expect(rho).toBeGreaterThan(0);
+    expect(rho).toBeLessThan(0.8);
+  });
+
+  it('la banda del totale e’ piu’ stretta della somma degli estremi', () => {
+    // Sommare gli estremi assume che tutte le categorie sbaglino insieme:
+    // sovrastima l’incertezza, e sul patrimonio l’errore si vede.
+    const res = project(makeDefaultProfile(0), snapshot!, {
+      baseYear: 2026,
+      horizon: 15,
+      anchorOverride: null,
+      confidence: 0.8,
+    });
+    const y = res.years[15]!;
+    const sommaEstremi = y.categories.reduce((a, c) => a + c.lo, 0);
+    expect(y.totalLo).toBeGreaterThan(sommaEstremi);
+    expect(y.totalLo).toBeLessThan(y.totalNominal);
+  });
+
+  it('il patrimonio ha una banda coerente col segno della spesa', () => {
+    const res = project(makeDefaultProfile(0), snapshot!, {
+      baseYear: 2026,
+      horizon: 15,
+      anchorOverride: null,
+      confidence: 0.8,
+    });
+    for (const y of res.years) {
+      expect(y.cumulativeWealthLo).toBeLessThanOrEqual(y.cumulativeWealth + 1e-6);
+      expect(y.cumulativeWealthHi).toBeGreaterThanOrEqual(y.cumulativeWealth - 1e-6);
+    }
   });
 
   it('i tendenziali di dicembre coprono tutti gli anni recenti', () => {

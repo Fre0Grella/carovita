@@ -22,6 +22,8 @@ browser e nessuna configurazione lascia il dispositivo.
   carico del solo intestatario.
 - **Previsione** a 3–30 anni per categoria, con bande di incertezza e valori
   sia in euro correnti sia in euro di oggi.
+- **Patrimonio**: quanto ti resta anno per anno, con la soglia dello zero e
+  l'anno in cui i risparmi si esaurirebbero, anche nello scenario peggiore.
 - **Spiegazione** di ogni categoria: quanta parte dell'aumento viene
   dall'inflazione generale, quanta dal differenziale della categoria, quanta
   dal rientro dalla situazione attuale, quanta dalle regole del contratto.
@@ -121,6 +123,23 @@ Due dettagli che è facile sbagliare e che qui sono modellati:
 Le spese condominiali si dividono invece in parti uguali: cucina, pulizie e
 ascensore non dipendono da quanto è grande la tua camera.
 
+### Le incertezze non si sommano
+
+Le bande delle singole categorie **non** si sommano fra loro. Sommarle
+equivarrebbe ad assumere che energia, alimentari, affitto e trasporti sbaglino
+tutti nella stessa direzione nello stesso anno. Si aggregano invece con la
+correlazione media osservata fra le categorie, che su questi dati vale **0,20**:
+
+```
+Var = (1 − ρ) · Σ hᵢ²  +  ρ · (Σ hᵢ)²
+```
+
+Con ρ = 1 si ritrova la somma lineare, con ρ = 0 la somma in quadratura. Sul
+totale di spesa la differenza è visibile; sul patrimonio è vistosa, perché il
+risparmio è la differenza fra due numeri grandi e vicini e ne eredita l'errore
+amplificato. È anche il motivo per cui la banda sul patrimonio resta larga
+anche dopo la correzione: quella larghezza è reale, non un artefatto.
+
 ### Validazione
 
 Il modello è validato **fuori campione** con un walk-forward: si tronca la
@@ -193,7 +212,7 @@ npm run dev            # http://localhost:5173/carovita/
 Altri comandi:
 
 ```bash
-npm test          # 63 test: invarianti di dominio + integrazione sui dati veri
+npm test          # 79 test: invarianti di dominio + integrazione sui dati veri
 npm run typecheck
 npm run backtest  # rigenera docs/BACKTEST.md
 npm run build

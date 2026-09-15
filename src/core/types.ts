@@ -354,6 +354,17 @@ export interface YearProjection {
   savingsNominal: number;
   /** Patrimonio cumulato a fine anno, in EUR nominali. */
   cumulativeWealth: number;
+  /**
+   * Patrimonio nello scenario di spesa alta e in quello di spesa bassa, in
+   * EUR nominali.
+   *
+   * La banda sul patrimonio è molto più larga, in proporzione, di
+   * quella sulla spesa: il risparmio è la differenza fra due numeri
+   * grandi e simili, quindi un errore del 5% sulla spesa può spostare il
+   * risparmio annuo di metà. È il motivo per cui va mostrata.
+   */
+  cumulativeWealthLo: number;
+  cumulativeWealthHi: number;
   categories: CategoryYearProjection[];
   /** Eventi rilevanti dell'anno (scatti ISTAT, rinnovi, imposte). */
   events: ProjectionEvent[];
@@ -367,6 +378,11 @@ export interface ProjectionResult {
   models: CategoryModel[];
   /** Ancora di inflazione usata, in frazione. */
   anchor: number;
+  /**
+   * Correlazione media stimata fra le inflazioni delle categorie, usata per
+   * aggregare le loro incertezze nel totale.
+   */
+  categoryCorrelation: number;
   /** Livello di confidenza delle bande (es. 0.8). */
   confidence: number;
   warnings: string[];

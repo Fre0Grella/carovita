@@ -358,6 +358,91 @@ export function cumulativeIndex(
 }
 
 /**
+ * Correlazione media fra le inflazioni delle categorie.
+ *
+ * Serve a sommare correttamente le incertezze. Sommare gli estremi delle
+ * bande di categoria (`Σ lo`, `Σ hi`) equivale ad assumere
+ * correlazione perfetta: che energia, alimentari, trasporti e affitto
+ * sbaglino tutti nella stessa direzione e nello stesso momento. È falso,
+ * e produce bande molto più larghe del vero — un difetto che passa
+ * inosservato sul totale di spesa ma diventa evidente sul patrimonio, che
+ * è una differenza fra numeri grandi.
+ *
+ * All'estremo opposto, trattarle come indipendenti sottostima: le categorie
+ * condividono un fattore comune, l'inflazione generale. La correlazione
+ * media stimata dai dati storici sta in mezzo, ed è quella giusta.
+ */
+export function averageCategoryCorrelation(snapshot: DataSnapshot): number {
+  const series = Object.values(snapshot.series).filter(
+    (s): s is IndexSeries => Boolean(s) && s.category !== 'headline',
+  );
+  if (series.length < 2) return 1;
+
+  // Tassi annui per categoria, sugli anni comuni a tutte le serie.
+  const refMonth = referenceMonth(series[0]!.obs);
+  const maps = series.map((s) => sameMonthInflation(s.obs, refMonth));
+  const years = [...maps[0]!.keys()].filter((y) =>
+    maps.every((m) => m.has(y)),
+  );
+  if (years.length < 5) return 1;
+
+  const cols = maps.map((m) => years.map((y) => m.get(y)!));
+
+  let sum = 0;
+  let n = 0;
+  for (let i = 0; i < cols.length; i++) {
+    for (let j = i + 1; j < cols.length; j++) {
+      const r = correlation(cols[i]!, cols[j]!);
+      if (Number.isFinite(r)) {
+        sum += r;
+        n++;
+      }
+    }
+  }
+  if (n === 0) return 1;
+  // Una correlazione media negativa non ha senso come ipotesi di
+  // aggregazione prudenziale: si tronca a zero (categorie indipendenti).
+  return clamp(sum / n, 0, 1);
+}
+
+function correlation(a: number[], b: number[]): number {
+  const ma = mean(a);
+  const mb = mean(b);
+  let num = 0;
+  let va = 0;
+  let vb = 0;
+  for (let i = 0; i < a.length; i++) {
+    const da = a[i]! - ma;
+    const db = b[i]! - mb;
+    num += da * db;
+    va += da * da;
+    vb += db * db;
+  }
+  const den = Math.sqrt(va * vb);
+  return den === 0 ? NaN : num / den;
+}
+
+/**
+ * Somma le semi-ampiezze delle bande di categoria tenendo conto della loro
+ * correlazione media.
+ *
+ *     Var = (1 − ρ) · Σ hᵢ² + ρ · (Σ hᵢ)²
+ *
+ * Con ρ = 1 si ritrova la somma lineare (correlazione perfetta), con
+ * ρ = 0 la somma in quadratura (indipendenza). È la formula della
+ * varianza di una somma con correlazione uniforme.
+ */
+export function aggregateHalfWidths(
+  halfWidths: number[],
+  rho: number,
+): number {
+  if (halfWidths.length === 0) return 0;
+  const linear = halfWidths.reduce((a, b) => a + b, 0);
+  const squares = halfWidths.reduce((a, b) => a + b * b, 0);
+  return Math.sqrt((1 - rho) * squares + rho * linear * linear);
+}
+
+/**
  * Trova il modello di una categoria, con fallback sulla headline se la
  * categoria non è disponibile nello snapshot. Il fallback è esplicito e
  * viene segnalato nei warning della proiezione.

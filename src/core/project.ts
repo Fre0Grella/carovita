@@ -4,6 +4,8 @@
  */
 
 import {
+  aggregateHalfWidths,
+  averageCategoryCorrelation,
   cumulativeIndex,
   estimateAllModels,
   estimateCategoryModel,
@@ -59,6 +61,10 @@ export function project(
   const models = estimateAllModels(snapshot);
   const anchor = settings.anchorOverride ?? snapshot.longRunAnchor;
   const { baseYear, horizon, confidence } = settings;
+
+  // Correlazione media fra categorie: governa quanto le loro incertezze si
+  // sommano invece di compensarsi.
+  const rho = averageCategoryCorrelation(snapshot);
 
   const headlineModel = modelFor(models, 'headline');
   if (!headlineModel) {
@@ -154,6 +160,10 @@ export function project(
 
   const years: YearProjection[] = [];
   let wealth = profile.initialSavings;
+  // Stesse ricorsioni sugli estremi della banda di spesa: spendendo di piu'
+  // si accumula di meno, quindi la spesa alta genera il patrimonio basso.
+  let wealthLo = profile.initialSavings;
+  let wealthHi = profile.initialSavings;
 
   for (let h = 0; h <= horizon; h++) {
     const year = baseYear + h;
@@ -232,8 +242,20 @@ export function project(
     }
 
     const totalNominal = categories.reduce((a, c) => a + c.nominal, 0);
-    const totalLo = categories.reduce((a, c) => a + c.lo, 0);
-    const totalHi = categories.reduce((a, c) => a + c.hi, 0);
+    // Le bande si aggregano secondo la correlazione stimata, non sommando gli
+    // estremi: sommarli assumerebbe che tutte le categorie sbaglino insieme.
+    const totalLo =
+      totalNominal -
+      aggregateHalfWidths(
+        categories.map((c) => c.nominal - c.lo),
+        rho,
+      );
+    const totalHi =
+      totalNominal +
+      aggregateHalfWidths(
+        categories.map((c) => c.hi - c.nominal),
+        rho,
+      );
 
     // Reddito: indicizzazione parziale all'inflazione + crescita reale.
     // Con pass-through 1 il salario segue interamente il livello dei prezzi,
@@ -249,10 +271,17 @@ export function project(
       Math.pow(1 + profile.income.realGrowth, h);
 
     const savings = incomeNominal - totalNominal;
+    const savingsLo = incomeNominal - totalHi;
+    const savingsHi = incomeNominal - totalLo;
     if (h > 0) {
-      wealth = wealth * (1 + profile.savingsReturn) + savings;
+      const r = 1 + profile.savingsReturn;
+      wealth = wealth * r + savings;
+      wealthLo = wealthLo * r + savingsLo;
+      wealthHi = wealthHi * r + savingsHi;
     } else {
       wealth = profile.initialSavings + savings;
+      wealthLo = profile.initialSavings + savingsLo;
+      wealthHi = profile.initialSavings + savingsHi;
     }
 
     years.push({
@@ -265,6 +294,8 @@ export function project(
       incomeNominal,
       savingsNominal: savings,
       cumulativeWealth: wealth,
+      cumulativeWealthLo: wealthLo,
+      cumulativeWealthHi: wealthHi,
       categories,
       events,
     });
@@ -277,6 +308,7 @@ export function project(
     years,
     models,
     anchor,
+    categoryCorrelation: rho,
     confidence,
     warnings,
   };
@@ -400,6 +432,16 @@ export interface ProfileSummary {
   finalWealthReal: number;
   /** Tasso di crescita annuo composto della spesa, in frazione. */
   cagr: number;
+  /** Risparmio del primo anno, in EUR (negativo se si intacca il patrimonio). */
+  savingsFirstYear: number;
+  /**
+   * Primo anno in cui il patrimonio scende sotto zero, oppure `null` se non
+   * accade entro l'orizzonte. È la risposta alla domanda «fino a
+   * quando reggo?».
+   */
+  depletionYear: number | null;
+  /** Come sopra, ma nello scenario di spesa alta. */
+  depletionYearLo: number | null;
 }
 
 export function summarize(result: ProjectionResult): ProfileSummary {
@@ -411,9 +453,15 @@ export function summarize(result: ProjectionResult): ProfileSummary {
     n > 0 && first.totalNominal > 0
       ? Math.pow(last.totalNominal / first.totalNominal, 1 / n) - 1
       : 0;
+  const firstNegative = (pick: (y: YearProjection) => number): number | null =>
+    result.years.find((y) => pick(y) < 0)?.year ?? null;
+
   return {
     profileId: result.profileId,
     profileName: result.profileName,
+    savingsFirstYear: first.savingsNominal,
+    depletionYear: firstNegative((y) => y.cumulativeWealth),
+    depletionYearLo: firstNegative((y) => y.cumulativeWealthLo),
     baseSpend: first.totalNominal,
     finalSpend: last.totalNominal,
     finalSpendReal: last.totalReal,

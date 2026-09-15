@@ -23,6 +23,7 @@ import {
   YAxis,
 } from 'recharts';
 
+import { summarize } from '../core/project.js';
 import type { ProjectionResult } from '../core/types.js';
 import { eur, eurSigned, pct, pctSigned } from './format.js';
 
@@ -52,6 +53,22 @@ export function Forecast({ result, real }: Props): JSX.Element {
   const first = result.years[0]!;
   const last = result.years[result.years.length - 1]!;
 
+  const wealthData = useMemo(
+    () =>
+      result.years.map((y) => {
+        const k = real ? y.priceLevel : 1;
+        const lo = y.cumulativeWealthLo / k;
+        const hi = y.cumulativeWealthHi / k;
+        return {
+          anno: y.year,
+          patrimonio: y.cumulativeWealth / k,
+          bandaBase: lo,
+          bandaAlt: hi - lo,
+        };
+      }),
+    [result, real],
+  );
+
   const chartData = useMemo(
     () =>
       result.years.map((y) => ({
@@ -78,8 +95,119 @@ export function Forecast({ result, real }: Props): JSX.Element {
   const growth = amount(first) > 0 ? amount(last) / amount(first) - 1 : 0;
   const nYears = result.years.length - 1;
 
+  const sum = summarize(result);
+
   return (
     <>
+      <div className="card">
+        <h2>Con quanti soldi resti</h2>
+        <p className="muted small" style={{ marginTop: -4 }}>
+          Patrimonio accumulato anno per anno: quello che hai oggi, più tutto
+          ciò che avanza o che ti manca, con gli interessi.{' '}
+          {real ? 'In euro di oggi.' : 'In euro correnti.'}
+        </p>
+
+        <Verdict result={result} real={real} />
+
+        <div className="legend" style={{ marginTop: 10 }}>
+          <span>
+            <span className="swatch" style={{ background: 'var(--series-1)' }} />
+            Patrimonio
+          </span>
+          <span>
+            <span
+              className="swatch"
+              style={{
+                background: 'var(--series-1)',
+                opacity: 0.25,
+              }}
+            />
+            Se la spesa va peggio o meglio del previsto
+          </span>
+        </div>
+
+        <div className="chart-box">
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart
+              data={wealthData}
+              margin={{ top: 8, right: 16, bottom: 4, left: 8 }}
+            >
+              <CartesianGrid
+                stroke="var(--border)"
+                strokeDasharray="2 4"
+                vertical={false}
+              />
+              <XAxis
+                dataKey="anno"
+                stroke="var(--text-muted)"
+                tick={{ fontSize: 12 }}
+                tickLine={false}
+              />
+              <YAxis
+                stroke="var(--text-muted)"
+                tick={{ fontSize: 12 }}
+                tickLine={false}
+                axisLine={false}
+                width={80}
+                tickFormatter={(v: number) => eur(v)}
+              />
+              <Tooltip content={<MoneyTooltip />} />
+              {/* Lo zero è la soglia che conta: sotto, i risparmi sono finiti. */}
+              <ReferenceLine
+                y={0}
+                stroke="var(--critical)"
+                strokeWidth={1.5}
+                label={{
+                  value: 'risparmi esauriti',
+                  position: 'insideBottomLeft',
+                  fontSize: 11,
+                  fill: 'var(--critical)',
+                }}
+              />
+              <Area
+                dataKey="bandaBase"
+                stackId="banda"
+                stroke="none"
+                fill="none"
+                isAnimationActive={false}
+                legendType="none"
+              />
+              <Area
+                dataKey="bandaAlt"
+                stackId="banda"
+                stroke="none"
+                fill="var(--series-1)"
+                fillOpacity={0.16}
+                isAnimationActive={false}
+                legendType="none"
+                name="Ampiezza banda"
+              />
+              <Line
+                dataKey="patrimonio"
+                stroke="var(--series-1)"
+                strokeWidth={2}
+                dot={false}
+                isAnimationActive={false}
+                name="Patrimonio"
+              />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+
+        <p className="hint">
+          La fascia è larga perché il risparmio è la differenza fra due numeri
+          grandi e vicini: uno scarto del 5% sulla spesa può cambiare di molto
+          quanto avanza a fine anno.
+          {sum.depletionYear === null && sum.depletionYearLo !== null && (
+            <>
+              {' '}
+              Nello scenario di spesa alta i risparmi finirebbero nel{' '}
+              <strong>{sum.depletionYearLo}</strong>.
+            </>
+          )}
+        </p>
+      </div>
+
       <div className="card">
         <h2>
           Spesa annua {real ? 'in euro di oggi' : 'in euro correnti'},{' '}
@@ -176,8 +304,9 @@ export function Forecast({ result, real }: Props): JSX.Element {
         </div>
 
         <p className="hint">
-          Se la linea della spesa supera quella del reddito, in quell’anno il
-          profilo smette di risparmiare e inizia a erodere il patrimonio.
+          È la spiegazione del grafico precedente: la distanza fra le due linee
+          è quanto metti da parte ogni anno. Dove la spesa supera il reddito,
+          il patrimonio comincia a scendere.
         </p>
       </div>
 
@@ -274,6 +403,67 @@ export function Forecast({ result, real }: Props): JSX.Element {
 }
 
 // ---------------------------------------------------------------------------
+
+/**
+ * Risposta in una frase alla domanda «con quanti soldi resto».
+ *
+ * Un grafico da solo non risponde: bisogna leggerlo. Qui la conclusione
+ * è scritta, con il numero e l'anno già dentro, e cambia tono a
+ * seconda che il patrimonio cresca, si assottigli o finisca.
+ */
+function Verdict({
+  result,
+  real,
+}: {
+  result: ProjectionResult;
+  real: boolean;
+}): JSX.Element {
+  const s = summarize(result);
+  const last = result.years[result.years.length - 1]!;
+  const finalWealth = real ? s.finalWealthReal : s.finalWealth;
+  const scale = real ? ' in euro di oggi' : '';
+
+  if (s.depletionYear !== null) {
+    const anni = s.depletionYear - result.baseYear;
+    return (
+      <div className="notice" style={{ borderLeftColor: 'var(--critical)' }}>
+        <strong>
+          I risparmi si esauriscono nel {s.depletionYear}
+        </strong>
+        , fra {anni} {anni === 1 ? 'anno' : 'anni'}. Da lì in poi la spesa
+        prevista supera quello che hai messo da parte: nel {last.year} saresti
+        a {eur(finalWealth)}
+        {scale}.
+      </div>
+    );
+  }
+
+  if (s.savingsFirstYear < 0) {
+    return (
+      <div className="notice">
+        <strong>Stai spendendo più di quanto incassi</strong> —{' '}
+        {eur(-s.savingsFirstYear)} l’anno. Il patrimonio regge fino al{' '}
+        {last.year}, chiudendo a {eur(finalWealth)}
+        {scale}, ma la direzione è in discesa.
+      </div>
+    );
+  }
+
+  return (
+    <div className="notice info">
+      <strong>Nel {last.year} avresti {eur(finalWealth)}</strong>
+      {scale}, partendo da {eur(result.years[0]!.cumulativeWealth)} e mettendo
+      da parte {eur(s.savingsFirstYear)} nel primo anno.
+      {s.depletionYearLo !== null && (
+        <>
+          {' '}
+          Se però la spesa andasse come nello scenario peggiore, i
+          risparmi finirebbero nel <strong>{s.depletionYearLo}</strong>.
+        </>
+      )}
+    </div>
+  );
+}
 
 /** Scomposizione a cascata dell'aumento di una categoria. */
 function Attribution({

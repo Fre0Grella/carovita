@@ -185,6 +185,17 @@ export function DataPanel({ snapshot, result }: Props): JSX.Element {
             <span className="mono">docs/BACKTEST.md</span> della repository.
           </p>
           <p className="small">
+            Le incertezze delle categorie non si sommano fra loro: verrebbe
+            una banda molto più larga del vero, perché equivarrebbe a
+            supporre che energia, alimentari e affitto sbaglino tutti nella
+            stessa direzione e nello stesso momento. Si aggregano invece
+            usando la correlazione media effettivamente osservata fra le
+            categorie, che su questi dati vale{' '}
+            <strong>{result.categoryCorrelation.toFixed(2)}</strong>. Sul
+            patrimonio la differenza è vistosa, perché il risparmio è la
+            differenza fra due numeri grandi e vicini.
+          </p>
+          <p className="small">
             <strong>Limite noto:</strong> le bande di incertezza sono ben
             calibrate a uno o due anni, ma diventano troppo strette sugli
             orizzonti lunghi. In trent’anni l’Italia è passata per il cambio

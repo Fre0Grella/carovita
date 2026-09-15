@@ -7,6 +7,8 @@ import {
   yoyRates,
 } from '../src/core/series.js';
 import {
+  aggregateHalfWidths,
+  averageCategoryCorrelation,
   cumulativeIndex,
   estimateCategoryModel,
   forecastRate,
@@ -20,7 +22,11 @@ import {
   contractTerm,
   registrationCosts,
 } from '../src/core/rent.js';
-import { forecastRatesByCategory, project } from '../src/core/project.js';
+import {
+  forecastRatesByCategory,
+  project,
+  summarize,
+} from '../src/core/project.js';
 import type {
   DataSnapshot,
   HousingConfig,
@@ -785,5 +791,135 @@ describe('override della crescita', () => {
     const food = rates.get('food')!;
     // Serie di test al 2% con ancora al 2%: il composto equivalente e' 2%.
     expect(food).toBeCloseTo(0.02, 4);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Patrimonio
+// ---------------------------------------------------------------------------
+
+describe('patrimonio', () => {
+  it('parte dai risparmi iniziali piu\u2019 il primo avanzo', () => {
+    const p = makeProfile({ initialSavings: 10_000, savingsReturn: 0 });
+    const res = project(p, makeSnapshot());
+    const y0 = res.years[0]!;
+    expect(y0.cumulativeWealth).toBeCloseTo(10_000 + y0.savingsNominal, 6);
+  });
+
+  it('la banda del patrimonio contiene la stima centrale', () => {
+    const res = project(makeProfile(), makeSnapshot());
+    for (const y of res.years) {
+      expect(y.cumulativeWealthLo).toBeLessThanOrEqual(y.cumulativeWealth + 1e-6);
+      expect(y.cumulativeWealthHi).toBeGreaterThanOrEqual(y.cumulativeWealth - 1e-6);
+    }
+  });
+
+  it('spendere di piu\u2019 lascia meno patrimonio', () => {
+    // Invariante di segno: la banda alta di spesa deve generare la banda
+    // bassa di patrimonio, non il contrario.
+    const res = project(makeProfile(), makeSnapshot());
+    const last = res.years[res.years.length - 1]!;
+    expect(last.cumulativeWealthLo).toBeLessThan(last.cumulativeWealthHi);
+  });
+
+  it('la banda del patrimonio si allarga con l\u2019orizzonte', () => {
+    const res = project(makeProfile(), makeSnapshot());
+    const width = (i: number) =>
+      res.years[i]!.cumulativeWealthHi - res.years[i]!.cumulativeWealthLo;
+    expect(width(res.years.length - 1)).toBeGreaterThan(width(1));
+  });
+
+  it('capitalizza il rendimento sui risparmi', () => {
+    const senza = project(
+      makeProfile({ initialSavings: 50_000, savingsReturn: 0 }),
+      makeSnapshot(),
+    );
+    const con = project(
+      makeProfile({ initialSavings: 50_000, savingsReturn: 0.04 }),
+      makeSnapshot(),
+    );
+    const n = senza.years.length - 1;
+    expect(con.years[n]!.cumulativeWealth).toBeGreaterThan(
+      senza.years[n]!.cumulativeWealth,
+    );
+  });
+
+  it('individua l\u2019anno in cui i risparmi finiscono', () => {
+    // Reddito volutamente insufficiente: il patrimonio deve andare sotto zero
+    // e l'anno va segnalato, perche' e' la domanda a cui serve rispondere.
+    const p = makeProfile({
+      initialSavings: 5_000,
+      savingsReturn: 0,
+      income: {
+        monthlyNet: 400,
+        monthsPerYear: 12,
+        inflationPassThrough: 0,
+        realGrowth: 0,
+      },
+    });
+    const res = project(p, makeSnapshot());
+    const s = summarize(res);
+    expect(s.depletionYear).not.toBeNull();
+    const anno = res.years.find((y) => y.year === s.depletionYear)!;
+    expect(anno.cumulativeWealth).toBeLessThan(0);
+    // E deve essere davvero il primo: l'anno prima era ancora positivo.
+    const prima = res.years.find((y) => y.year === s.depletionYear! - 1);
+    if (prima) expect(prima.cumulativeWealth).toBeGreaterThanOrEqual(0);
+  });
+
+  it('non segnala esaurimento se il patrimonio resta positivo', () => {
+    const p = makeProfile({
+      initialSavings: 200_000,
+      income: {
+        monthlyNet: 6_000,
+        monthsPerYear: 13,
+        inflationPassThrough: 1,
+        realGrowth: 0,
+      },
+    });
+    expect(summarize(project(p, makeSnapshot())).depletionYear).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Aggregazione delle incertezze
+// ---------------------------------------------------------------------------
+
+describe('aggregazione delle bande', () => {
+  it('con correlazione 1 somma linearmente', () => {
+    // Correlazione perfetta: tutte le categorie sbagliano insieme.
+    expect(aggregateHalfWidths([3, 4, 5], 1)).toBeCloseTo(12, 6);
+  });
+
+  it('con correlazione 0 somma in quadratura', () => {
+    // Indipendenza: gli errori si compensano in parte.
+    expect(aggregateHalfWidths([3, 4], 0)).toBeCloseTo(5, 6);
+  });
+
+  it('una correlazione intermedia sta fra i due estremi', () => {
+    const h = [3, 4, 5];
+    const indip = aggregateHalfWidths(h, 0);
+    const media = aggregateHalfWidths(h, 0.2);
+    const perfetta = aggregateHalfWidths(h, 1);
+    expect(media).toBeGreaterThan(indip);
+    expect(media).toBeLessThan(perfetta);
+  });
+
+  it('una sola categoria non viene alterata dalla correlazione', () => {
+    expect(aggregateHalfWidths([7], 0)).toBeCloseTo(7, 6);
+    expect(aggregateHalfWidths([7], 1)).toBeCloseTo(7, 6);
+  });
+
+  it('su serie senza variabilita ricade prudenzialmente su 1', () => {
+    // Le serie sintetiche crescono a tasso costante: la correlazione non e'
+    // definita, e in quel caso si sceglie l'ipotesi piu' prudente invece di
+    // inventare un numero. La verifica sui dati veri sta in snapshot.test.ts.
+    expect(averageCategoryCorrelation(makeSnapshot())).toBe(1);
+  });
+
+  it('stima una correlazione plausibile dalle serie', () => {
+    const rho = averageCategoryCorrelation(makeSnapshot());
+    expect(rho).toBeGreaterThanOrEqual(0);
+    expect(rho).toBeLessThanOrEqual(1);
   });
 });
