@@ -88,21 +88,40 @@ export function annualInflation(obs: MonthlyObs[]): Map<number, number> {
 }
 
 /**
- * Tendenziale annuo di dicembre, per ogni anno in cui è calcolabile.
+ * Tendenziale annuo misurato sempre nello stesso mese dell'anno, per ogni
+ * anno in cui è calcolabile.
  *
- * È questa la definizione su cui lavora il modello, non la media annua: la
- * previsione parte dall'ultimo tendenziale disponibile, quindi stima,
- * innesco e validazione devono usare tutti la stessa grandezza. Stimare i
- * parametri sulle medie annue (più lisce) e poi innescare la ricorsione con
- * un tendenziale puntuale (più rumoroso) sottostima gli shock e produce
- * bande di incertezza troppo strette.
+ * Il mese va fissato perché stima, innesco della previsione e validazione
+ * devono lavorare tutti sulla stessa grandezza. La previsione parte
+ * dall'ultimo tendenziale disponibile, che cade nel mese di aggiornamento
+ * della serie: se i parametri fossero stimati su un mese diverso (o sulle
+ * medie annue, più lisce) si validerebbe un modello che non è quello
+ * spedito. Con categorie stagionali come l'energia lo scarto non è
+ * accademico: fra agosto e il dicembre precedente può superare i 15 punti.
+ *
+ * `month` è 1-12.
  */
-export function decemberInflation(obs: MonthlyObs[]): Map<number, number> {
+export function sameMonthInflation(
+  obs: MonthlyObs[],
+  month: number,
+): Map<number, number> {
+  const suffix = `-${String(month).padStart(2, '0')}`;
   const out = new Map<number, number>();
   for (const r of yoyRates(obs)) {
-    if (r.t.endsWith('-12')) out.set(yearOf(r.t), r.v);
+    if (r.t.endsWith(suffix)) out.set(yearOf(r.t), r.v);
   }
   return out;
+}
+
+/** Mese (1-12) dell'ultima osservazione: è il mese di riferimento del modello. */
+export function referenceMonth(obs: MonthlyObs[]): number {
+  const last = obs[obs.length - 1];
+  return last ? Number(last.t.slice(5, 7)) : 12;
+}
+
+/** Scorciatoia storica: tendenziale di dicembre. */
+export function decemberInflation(obs: MonthlyObs[]): Map<number, number> {
+  return sameMonthInflation(obs, 12);
 }
 
 /** Ultimo tendenziale annuo disponibile, in frazione. */

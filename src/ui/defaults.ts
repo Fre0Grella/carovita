@@ -80,7 +80,6 @@ export function makeDefaultProfile(index = 0): Profile {
       registrationTaxShare: 0.5,
       highTensionMunicipality: true,
       condoFees: 60,
-      movesAtContractEnd: true,
     },
     utilities: [
       item('u-energia', 'Elettricità e gas', 'utilities', 110),

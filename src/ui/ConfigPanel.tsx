@@ -259,23 +259,14 @@ export function ConfigPanel({ profile, onChange }: Props): JSX.Element {
               </div>
             </div>
 
-            <div className="field checkbox">
-              <input
-                id="h-moves"
-                type="checkbox"
-                checked={h.movesAtContractEnd}
-                onChange={(e) =>
-                  setHousing({ movesAtContractEnd: e.target.checked })
-                }
-              />
-              <div>
-                <label htmlFor="h-moves">
-                  A fine contratto cambio casa o rinegozio
-                </label>
-                <div className="hint">
-                  Se attivo, alla scadenza il canone torna ai prezzi di mercato
-                  correnti, recuperando di colpo il divario accumulato.
-                </div>
+            <div className="field" style={{ gridColumn: '1 / -1' }}>
+              <div className="hint">
+                Alla scadenza del contratto si firma un contratto nuovo, e il
+                canone torna ai prezzi di mercato correnti: decadono sia il
+                tetto del 75% sugli scatti ISTAT sia il blocco legato alla
+                cedolare secca, che vale per quel contratto e non per sempre.
+                È il salto che chi affitta conosce bene, e il modello lo
+                applica anche se resti nella stessa casa.
               </div>
             </div>
           </div>

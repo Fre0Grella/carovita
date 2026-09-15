@@ -187,9 +187,17 @@ export function buildRentSchedule(input: RentScheduleInput): RentYear[] {
     if (h > 0) {
       yearsInContract += 1;
 
-      // Fine ciclo contrattuale: rinegoziazione al canone di mercato.
+      // Fine del ciclo contrattuale: si firma un contratto nuovo, quindi il
+      // canone viene rinegoziato ai prezzi di mercato correnti.
+      //
+      // Il riallineamento avviene sia che si traslochi sia che si resti: alla
+      // scadenza il contratto precedente non esiste piu', e con esso decadono
+      // sia il tetto del 75% sugli scatti ISTAT sia il blocco del canone
+      // legato alla cedolare secca, che vale per quel contratto e non in
+      // perpetuo. Ipotizzare un canone fermo per decenni produrrebbe risparmi
+      // che nella realta' nessuno ottiene.
       const cycleEnded = yearsInContract >= cycle;
-      if (cycleEnded && housing.movesAtContractEnd) {
+      if (cycleEnded) {
         const marketRent = (initialMonthlyRent * marketIndex[h]!) / marketIndex[0]!;
         const jump = marketRent / monthlyRent - 1;
         if (Math.abs(jump) > 0.001) {
@@ -197,24 +205,15 @@ export function buildRentSchedule(input: RentScheduleInput): RentYear[] {
             year,
             kind: 'market_reset',
             message:
-              `Fine contratto ${contractLabel(housing.contractType)}: il canone si riallinea ` +
-              `al mercato (${fmtPct(jump)} rispetto a quanto pagavi).`,
+              `Scadenza del contratto ${contractLabel(housing.contractType)}: ` +
+              `si firma un contratto nuovo e il canone torna ai prezzi di ` +
+              `mercato (${fmtPct(jump)} rispetto a quanto pagavi).`,
             amount: (marketRent - monthlyRent) * 12,
           });
         }
         monthlyRent = marketRent;
         yearsInContract = 0;
       } else {
-        if (cycleEnded) {
-          events.push({
-            year,
-            kind: 'contract_renewal',
-            message:
-              'Fine contratto: si ipotizza il rinnovo alle stesse condizioni, ' +
-              'senza riallineamento al canone di mercato.',
-          });
-          yearsInContract = 0;
-        }
         // Scatto ISTAT all'anniversario: al massimo il 75% della variazione FOI.
         if (indexationActive) {
           const foi = foiRates[h] ?? 0;

@@ -10,10 +10,12 @@
  * ## Due regole che questo backtest rispetta, e che è facile violare
  *
  * 1. **Si parte dallo stesso numero della produzione.** Il modello in
- *    esercizio innesca la ricorsione con l'ultimo tendenziale disponibile
- *    (`latestYoY`), non con la media annua. Se il backtest partisse dalla
- *    media annua misurerebbe una configurazione diversa da quella spedita,
- *    proprio nel termine che domina a un anno.
+ *    esercizio innesca la ricorsione con l'ultimo tendenziale disponibile,
+ *    che cade nel mese di aggiornamento della serie. Il backtest tronca la
+ *    storia in quello stesso mese di ogni anno, invece che a dicembre: con
+ *    categorie stagionali lo scarto fra i due inneschi supera i quindici
+ *    punti percentuali, e misurerebbe una configurazione diversa da quella
+ *    spedita proprio nel termine che domina a un anno.
  *
  * 2. **Si valida la grandezza che si mostra a schermo.** Il grafico non
  *    disegna il tasso annuo: disegna il *livello cumulato* della spesa con
@@ -31,7 +33,7 @@
  */
 
 import { estimateCategoryModel, forecastRate, uncertaintyBand } from './model.js';
-import { latestYoY, normInv, yoyRates } from './series.js';
+import { latestYoY, normInv, referenceMonth, yoyRates } from './series.js';
 import type { CategoryId, IndexSeries, MonthlyObs } from './types.js';
 
 export interface HorizonError {
@@ -89,36 +91,48 @@ export const DEFAULT_BACKTEST: BacktestOptions = {
   confidence: 0.8,
 };
 
-/** Tronca una serie mensile all'ultimo mese dell'anno indicato. */
-function truncate(series: IndexSeries, lastYear: number): IndexSeries {
-  return {
-    ...series,
-    obs: series.obs.filter((o) => Number(o.t.slice(0, 4)) <= lastYear),
-  };
+/** Tronca una serie al mese di riferimento dell'anno indicato. */
+function truncate(
+  series: IndexSeries,
+  year: number,
+  month: number,
+): IndexSeries {
+  const cutoff = `${year}-${String(month).padStart(2, '0')}`;
+  return { ...series, obs: series.obs.filter((o) => o.t <= cutoff) };
 }
 
-/** Valore dell'indice a dicembre dell'anno indicato, se presente. */
-function december(obs: MonthlyObs[], year: number): number | undefined {
-  return obs.find((o) => o.t === `${year}-12`)?.v;
+/** Valore dell'indice nel mese di riferimento dell'anno indicato. */
+function atMonth(
+  obs: MonthlyObs[],
+  year: number,
+  month: number,
+): number | undefined {
+  const t = `${year}-${String(month).padStart(2, '0')}`;
+  return obs.find((o) => o.t === t)?.v;
 }
 
-/** Tendenziale annuo a dicembre dell'anno indicato, se calcolabile. */
-function decemberYoY(obs: MonthlyObs[], year: number): number | undefined {
-  return yoyRates(obs).find((o) => o.t === `${year}-12`)?.v;
+/** Tendenziale annuo nel mese di riferimento dell'anno indicato. */
+function yoyAtMonth(
+  obs: MonthlyObs[],
+  year: number,
+  month: number,
+): number | undefined {
+  const t = `${year}-${String(month).padStart(2, '0')}`;
+  return yoyRates(obs).find((o) => o.t === t)?.v;
 }
 
 /**
  * Esegue il backtest walk-forward su una categoria.
  *
- * Tutte le grandezze sono definite su base dicembre, coerentemente con il
- * fatto che la produzione innesca la previsione con l'ultimo tendenziale
- * disponibile.
+ * Tutte le grandezze sono definite sul mese di riferimento della serie, lo
+ * stesso da cui la produzione fa partire la previsione.
  */
 export function backtestCategory(
   series: IndexSeries,
   headline: IndexSeries,
   opts: BacktestOptions = DEFAULT_BACKTEST,
 ): CategoryBacktest {
+  const refMonth = referenceMonth(series.obs);
   const years = [
     ...new Set(series.obs.map((o) => Number(o.t.slice(0, 4)))),
   ].sort((a, b) => a - b);
@@ -158,12 +172,13 @@ export function backtestCategory(
     origin <= lastYear;
     origin++
   ) {
-    const trainCat = truncate(series, origin);
-    const trainHead = truncate(headline, origin);
+    const trainCat = truncate(series, origin, refMonth);
+    const trainHead = truncate(headline, origin, refMonth);
 
-    // Stessa definizione della produzione: ultimo tendenziale disponibile.
+    // Stessa definizione della produzione: ultimo tendenziale disponibile,
+    // che dopo il troncamento cade proprio nel mese di riferimento.
     const lastObserved = latestYoY(trainCat.obs);
-    const baseLevel = december(trainCat.obs, origin);
+    const baseLevel = atMonth(trainCat.obs, origin, refMonth);
     if (lastObserved === null || baseLevel === undefined) continue;
 
     const model = {
@@ -180,8 +195,8 @@ export function backtestCategory(
       predictedLevel *= 1 + rate;
 
       const targetYear = origin + h;
-      const realizedRate = decemberYoY(series.obs, targetYear);
-      const targetLevel = december(series.obs, targetYear);
+      const realizedRate = yoyAtMonth(series.obs, targetYear, refMonth);
+      const targetLevel = atMonth(series.obs, targetYear, refMonth);
       if (realizedRate === undefined || targetLevel === undefined) continue;
 
       const bucket = acc.get(h)!;

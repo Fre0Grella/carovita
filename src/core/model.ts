@@ -42,7 +42,8 @@
 
 import {
   clamp,
-  decemberInflation,
+  referenceMonth,
+  sameMonthInflation,
   latestYoY,
   mean,
   normInv,
@@ -91,9 +92,12 @@ export function estimateCategoryModel(
   series: IndexSeries,
   headline: IndexSeries,
 ): CategoryModel {
-  // Tendenziali di dicembre: stessa grandezza che innesca la previsione.
-  const catInfl = decemberInflation(series.obs);
-  const headInfl = decemberInflation(headline.obs);
+  // Tendenziali misurati nel mese in cui la serie e' aggiornata: e' lo stesso
+  // mese da cui parte la previsione (`lastRate`), quindi i parametri
+  // descrivono esattamente il modello che viene poi usato.
+  const refMonth = referenceMonth(series.obs);
+  const catInfl = sameMonthInflation(series.obs, refMonth);
+  const headInfl = sameMonthInflation(headline.obs, refMonth);
 
   // Differenziale storico medio rispetto all'indice generale, calcolato solo
   // sugli anni presenti in entrambe le serie.

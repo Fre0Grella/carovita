@@ -164,12 +164,6 @@ export interface HousingConfig {
   highTensionMunicipality: boolean;
   /** Spese condominiali mensili in EUR. */
   condoFees: number;
-  /**
-   * A fine contratto l'inquilino si sposta e rinegozia ai prezzi di mercato
-   * correnti. Se `false`, il contratto viene rinnovato mantenendo il canone
-   * indicizzato (ipotesi favorevole all'inquilino).
-   */
-  movesAtContractEnd: boolean;
 }
 
 /** Una voce di spesa configurabile dall'utente. */

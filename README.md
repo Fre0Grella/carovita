@@ -62,8 +62,11 @@ mercato*, ma chi ha un contratto in corso non paga il canone di mercato:
   variazione FOI** (art. 32 L. 392/1978), quindi cresce meno del mercato;
 - con la **cedolare secca** il locatore rinuncia per legge ad aggiornarlo, e
   resta fermo in euro per tutta la durata;
-- alla scadenza, se si cambia casa, **salta** al livello di mercato corrente,
-  recuperando di colpo tutto il divario accumulato.
+- alla scadenza si firma un contratto nuovo e il canone **salta** al livello
+  di mercato corrente, recuperando di colpo tutto il divario accumulato. Il
+  salto avviene anche restando nella stessa casa: con il vecchio contratto
+  decadono sia il tetto del 75% sia il blocco della cedolare secca, che vale
+  per quel contratto e non in perpetuo.
 
 Il risultato è la tipica funzione a gradini che chi affitta conosce bene, e
 modellarla come crescita liscia sottostima i costi di chi si sposta spesso.
@@ -85,9 +88,16 @@ quest'anno"), che è ciò che si fa istintivamente, ed è sostanzialmente alla p
 con la regola fissa "sempre il 2%" — risultato atteso, dato che entrambi
 condividono la stessa ancora di lungo periodo.
 
+La validazione usa lo stesso innesco della produzione: entrambe partono
+dall'ultimo tendenziale disponibile, misurato nel mese di aggiornamento della
+serie. Non è un dettaglio: fra il tendenziale di agosto e quello del dicembre
+precedente, l'energia può differire di diciotto punti percentuali, e validare
+un innesco diverso da quello spedito significherebbe dichiarare una
+calibrazione mai misurata.
+
 **Limite noto, misurato e dichiarato:** le bande di incertezza sono ben
-calibrate a uno o due anni (copertura reale ~80% contro l'80% dichiarato), ma
-diventano troppo strette sugli orizzonti lunghi (~60% a dieci anni). In
+calibrate a uno o due anni (copertura reale ~78% contro l'80% dichiarato), ma
+diventano troppo strette sugli orizzonti lunghi (~66% a dieci anni). In
 trent'anni l'Italia è passata per il cambio all'euro, la crisi del 2008 e lo
 shock energetico del 2022: sono rotture di regime, che nessuna stima basata
 sulla volatilità passata riesce ad anticipare. Una proiezione a dieci anni va

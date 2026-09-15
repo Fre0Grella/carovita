@@ -169,7 +169,6 @@ d('snapshot reale', () => {
           ...base.housing,
           cedolareSecca: false,
           istatIndexation: true,
-          movesAtContractEnd: false,
         },
       },
       snapshot!,
@@ -180,7 +179,6 @@ d('snapshot reale', () => {
         housing: {
           ...base.housing,
           cedolareSecca: true,
-          movesAtContractEnd: false,
         },
       },
       snapshot!,

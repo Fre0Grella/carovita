@@ -90,7 +90,6 @@ const baseHousing: HousingConfig = {
   registrationTaxShare: 0.5,
   highTensionMunicipality: false,
   condoFees: 0,
-  movesAtContractEnd: false,
 };
 
 function makeProfile(overrides: Partial<Profile> = {}): Profile {
@@ -265,12 +264,12 @@ describe('rent', () => {
     expect(sched[1]!.monthlyRent).toBeCloseTo(expected, 6);
   });
 
-  it('con la cedolare secca il canone resta fermo e non si paga registro', () => {
+  it('con la cedolare secca il canone resta fermo per tutto il contratto', () => {
     const sched = buildRentSchedule({
       housing: { ...baseHousing, cedolareSecca: true },
       initialMonthlyRent: 1000,
       baseYear: 2026,
-      horizon: 5,
+      horizon: 5, // dentro il ciclo 4+4, prima del rinnovo
       marketIndex,
       foiRates,
       condoIndex,
@@ -287,7 +286,7 @@ describe('rent', () => {
       housing: { ...baseHousing, istatIndexation: false },
       initialMonthlyRent: 900,
       baseYear: 2026,
-      horizon: 4,
+      horizon: 4, // dentro il primo ciclo: nessun riallineamento di mercato
       marketIndex,
       foiRates,
       condoIndex,
@@ -297,7 +296,7 @@ describe('rent', () => {
 
   it('a fine contratto 4+4 il canone si riallinea al mercato', () => {
     const sched = buildRentSchedule({
-      housing: { ...baseHousing, movesAtContractEnd: true },
+      housing: { ...baseHousing },
       initialMonthlyRent: 1000,
       baseYear: 2026,
       horizon: 10,
@@ -383,6 +382,23 @@ describe('rent', () => {
     expect(sched[3]!.annualRent).toBe(0);
     expect(sched[3]!.registrationTax).toBe(0);
     expect(sched[3]!.total).toBeCloseTo(1200, 6);
+  });
+
+  it('il blocco della cedolare secca non dura oltre il contratto', () => {
+    // Il canone e' bloccato per quel contratto, non in perpetuo: alla
+    // scadenza del ciclo 4+4 si rinegozia comunque al mercato.
+    const sched = buildRentSchedule({
+      housing: { ...baseHousing, cedolareSecca: true },
+      initialMonthlyRent: 1000,
+      baseYear: 2026,
+      horizon: 10,
+      marketIndex,
+      foiRates,
+      condoIndex,
+    });
+    expect(sched[7]!.monthlyRent).toBeCloseTo(1000, 6);
+    expect(sched[8]!.monthlyRent).toBeCloseTo(1000 * Math.pow(1.03, 8), 6);
+    expect(sched[8]!.events.some((e) => e.kind === 'market_reset')).toBe(true);
   });
 
   it('indicizza le spese condominiali invece di tenerle ferme', () => {
