@@ -17,6 +17,9 @@ browser e nessuna configurazione lascia il dispositivo.
 - **Configurazione** di affitto (contratto, imposte di registro e bollo,
   cedolare secca, condominio), utenze e spese, con selettore fra tutti i 7.904
   comuni italiani.
+- **Coabitazione**: ripartizione del canone fra coinquilini in base alla
+  metratura della camera e agli spazi comuni, con camera doppia e imposte a
+  carico del solo intestatario.
 - **Previsione** a 3–30 anni per categoria, con bande di incertezza e valori
   sia in euro correnti sia in euro di oggi.
 - **Spiegazione** di ogni categoria: quanta parte dell'aumento viene
@@ -73,6 +76,50 @@ modellarla come crescita liscia sottostima i costi di chi si sposta spesso.
 Sono modellate anche l'imposta di registro (2%, minimo 67 €, ripartibile fra le
 parti, ridotta del 30% per il concordato nei comuni ad alta tensione abitativa)
 e l'imposta di bollo.
+
+### La previsione è visibile dove si configura
+
+Ogni voce di spesa mostra **già compilata** la crescita annua che il modello
+prevede per quella categoria — l'energia al 3,4% l'anno, internet al −1%,
+gli alimentari al 2%. Non è un campo vuoto da riempire a intuito: è la stima
+che verrà davvero applicata, esposta dove si prendono le decisioni invece che
+nascosta nei grafici.
+
+Il numero mostrato è il **tasso composto equivalente** sull'orizzonte scelto:
+il modello prevede un tasso diverso ogni anno, perché lo scostamento iniziale
+rientra gradualmente, e quello è il valore costante che porta allo stesso
+livello finale.
+
+Chi ha informazioni che il modello non può avere — un abbonamento che scade,
+un figlio all'asilo — può **sostituire la previsione** con la propria. In quel
+caso l'aumento viene attribuito interamente a quell'ipotesi, e attorno alla
+voce non viene disegnata alcuna banda di confidenza: l'incertezza misurata è
+quella del modello, non quella di una scelta personale.
+
+### Coabitazione
+
+La quota di canone si calcola come **la tua camera più la tua parte di spazi
+comuni**:
+
+```
+quota = (camera privata pro capite + (m² totali − m² camere) / persone) / m² totali
+```
+
+Una camera doppia conta per metà, perché quello spazio lo dividi. La
+costruzione garantisce che le quote di tutti i coinquilini **sommino
+esattamente a 1**: nessun euro di canone sparisce né viene contato due volte,
+ed è verificato da un test.
+
+Due dettagli che è facile sbagliare e che qui sono modellati:
+
+- il **minimo di 67 €** dell'imposta di registro vale per il contratto, non
+  per persona: si applica prima di ripartire, altrimenti ogni coinquilino
+  pagherebbe l'intero minimo;
+- chi **non è intestatario** del contratto non deve nulla al fisco — paga
+  l'affitto al coinquilino che ha firmato, unico obbligato.
+
+Le spese condominiali si dividono invece in parti uguali: cucina, pulizie e
+ascensore non dipendono da quanto è grande la tua camera.
 
 ### Validazione
 
@@ -146,7 +193,7 @@ npm run dev            # http://localhost:5173/carovita/
 Altri comandi:
 
 ```bash
-npm test          # 46 test: invarianti di dominio + integrazione sui dati veri
+npm test          # 63 test: invarianti di dominio + integrazione sui dati veri
 npm run typecheck
 npm run backtest  # rigenera docs/BACKTEST.md
 npm run build

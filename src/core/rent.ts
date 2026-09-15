@@ -38,6 +38,97 @@ import type {
   ProjectionEvent,
 } from './types.js';
 
+// ---------------------------------------------------------------------------
+// Coabitazione
+// ---------------------------------------------------------------------------
+
+/** Ripartizione dei costi fra coinquilini. */
+export interface ShareBreakdown {
+  /** Quota del canone a tuo carico, in frazione (1 = abiti da solo). */
+  rentShare: number;
+  /** Metratura privata pro capite (metà camera se doppia), in m². */
+  privateSqm: number;
+  /** Metratura degli spazi comuni pro capite, in m². */
+  commonSqm: number;
+  /** Metratura equivalente complessiva su cui si calcola la quota, in m². */
+  weightedSqm: number;
+  /** Numero di persone in casa. */
+  occupants: number;
+  /** Problemi nei dati inseriti (metrature incoerenti). */
+  warnings: string[];
+}
+
+/**
+ * Calcola la quota di canone a carico di chi vive in coabitazione.
+ *
+ *     quota = (camera privata pro capite + spazi comuni pro capite) / m² totali
+ *
+ * Gli spazi comuni sono ricavati per differenza fra la metratura
+ * dell'appartamento e la somma delle camere da letto, e divisi in parti
+ * uguali: cucina e bagno li usano tutti allo stesso modo, la camera no.
+ *
+ * La costruzione garantisce che **le quote di tutti i coinquilini sommino
+ * esattamente a 1**: le camere private sommano alla metratura complessiva
+ * delle camere, gli spazi comuni pro capite moltiplicati per il numero di
+ * persone restituiscono l'intera area comune. Nessun euro di canone sparisce
+ * né viene contato due volte.
+ */
+export function computeShare(housing: HousingConfig): ShareBreakdown {
+  const sharing = housing.sharing;
+  if (!sharing) {
+    return {
+      rentShare: 1,
+      privateSqm: housing.sqm,
+      commonSqm: 0,
+      weightedSqm: housing.sqm,
+      occupants: 1,
+      warnings: [],
+    };
+  }
+
+  const warnings: string[] = [];
+  const occupants = Math.max(1, Math.round(sharing.occupants));
+  const total = Math.max(1, housing.sqm);
+
+  let bedrooms = sharing.bedroomsSqm;
+  if (bedrooms > total) {
+    warnings.push(
+      'La somma delle camere supera la metratura dell’appartamento: ' +
+        'gli spazi comuni sono stati azzerati.',
+    );
+    bedrooms = total;
+  }
+  if (sharing.roomSqm > bedrooms) {
+    warnings.push(
+      'La tua camera risulta più grande della somma di tutte le camere: ' +
+        'controlla le metrature.',
+    );
+  }
+
+  const privateSqm = sharing.roomShared
+    ? sharing.roomSqm / 2
+    : sharing.roomSqm;
+  const commonSqm = Math.max(0, total - bedrooms) / occupants;
+  const weightedSqm = privateSqm + commonSqm;
+  const rentShare = clampShare(weightedSqm / total, warnings);
+
+  return { rentShare, privateSqm, commonSqm, weightedSqm, occupants, warnings };
+}
+
+function clampShare(x: number, warnings: string[]): number {
+  if (!Number.isFinite(x) || x <= 0) {
+    warnings.push(
+      'Quota non calcolabile dalle metrature inserite: uso l’intero canone.',
+    );
+    return 1;
+  }
+  if (x > 1) {
+    warnings.push('Quota superiore al 100%: limitata all’intero canone.');
+    return 1;
+  }
+  return x;
+}
+
 /** Aliquota dell'imposta di registro sulle locazioni abitative. */
 export const REGISTRATION_TAX_RATE = 0.02;
 
@@ -91,10 +182,12 @@ export function contractTerm(type: ContractType): {
 export interface RentYear {
   /** Anno solare. */
   year: number;
-  /** Canone mensile medio pagato nell'anno, in EUR. */
+  /** Canone mensile a tuo carico, in EUR (la tua quota se coabiti). */
   monthlyRent: number;
-  /** Canone annuo complessivo, in EUR. */
+  /** Canone annuo a tuo carico, in EUR. */
   annualRent: number;
+  /** Canone mensile dell'intera abitazione, in EUR. */
+  apartmentMonthlyRent: number;
   /** Imposta di registro a carico dell'inquilino, in EUR. */
   registrationTax: number;
   /** Imposta di bollo a carico dell'inquilino, in EUR. */
@@ -110,7 +203,12 @@ export interface RentYear {
 
 export interface RentScheduleInput {
   housing: HousingConfig;
-  /** Canone mensile iniziale effettivo, in EUR. */
+  /**
+   * Canone mensile iniziale dell'**intera** abitazione, in EUR. La
+   * ripartizione fra coinquilini avviene qui dentro, perche' alcune regole
+   * (il minimo dell'imposta di registro) vivono a livello di contratto e
+   * dividerle prima darebbe un risultato diverso.
+   */
   initialMonthlyRent: number;
   baseYear: number;
   horizon: number;
@@ -152,13 +250,19 @@ export function buildRentSchedule(input: RentScheduleInput): RentYear[] {
   } = input;
   const out: RentYear[] = [];
 
+  // Quota a tuo carico e numero di conviventi: le spese condominiali si
+  // dividono invece in parti uguali, perche' cucina, pulizie e ascensore
+  // non dipendono da quanto e' grande la tua camera.
+  const { rentShare, occupants } = computeShare(housing);
+
   if (housing.contractType === 'proprieta') {
     for (let h = 0; h <= horizon; h++) {
-      const condo = housing.condoFees * 12 * (condoIndex[h] ?? 1);
+      const condo = (housing.condoFees * 12 * (condoIndex[h] ?? 1)) / occupants;
       out.push({
         year: baseYear + h,
         monthlyRent: 0,
         annualRent: 0,
+        apartmentMonthlyRent: 0,
         registrationTax: 0,
         stampDuty: 0,
         condoFees: condo,
@@ -245,12 +349,17 @@ export function buildRentSchedule(input: RentScheduleInput): RentYear[] {
       }
     }
 
-    const annualRent = monthlyRent * 12;
+    // `monthlyRent` e' il canone dell'intera abitazione: da qui si ricavano
+    // sia la base imponibile del contratto sia la quota a tuo carico.
+    const apartmentAnnualRent = monthlyRent * 12;
+    const myMonthlyRent = monthlyRent * rentShare;
+    const annualRent = myMonthlyRent * 12;
     const { registrationTax, stampDuty } = registrationCosts({
       housing,
-      annualRent,
+      annualRent: apartmentAnnualRent,
       isFirstYear: h === 0,
       isRenewalYear: h > 0 && yearsInContract === 0,
+      rentShare,
     });
 
     if (registrationTax > 0) {
@@ -265,13 +374,14 @@ export function buildRentSchedule(input: RentScheduleInput): RentYear[] {
       });
     }
 
-    const condo = housing.condoFees * 12 * (condoIndex[h] ?? 1);
+    const condo = (housing.condoFees * 12 * (condoIndex[h] ?? 1)) / occupants;
     const marketRent = (initialMonthlyRent * marketIndex[h]!) / marketIndex[0]!;
 
     out.push({
       year,
-      monthlyRent,
+      monthlyRent: myMonthlyRent,
       annualRent,
+      apartmentMonthlyRent: monthlyRent,
       registrationTax,
       stampDuty,
       condoFees: condo,
@@ -290,12 +400,21 @@ export function buildRentSchedule(input: RentScheduleInput): RentYear[] {
  */
 export function registrationCosts(args: {
   housing: HousingConfig;
+  /** Canone annuo dell'**intera** abitazione: è la base imponibile di legge. */
   annualRent: number;
   isFirstYear: boolean;
   isRenewalYear: boolean;
+  /** Quota a tuo carico fra coinquilini (1 se abiti da solo). */
+  rentShare?: number;
 }): { registrationTax: number; stampDuty: number } {
   const { housing, annualRent, isFirstYear, isRenewalYear } = args;
+  const rentShare = args.rentShare ?? 1;
   if (housing.cedolareSecca || housing.contractType === 'proprieta') {
+    return { registrationTax: 0, stampDuty: 0 };
+  }
+  // Chi non ha firmato il contratto non deve nulla al fisco: paga l'affitto
+  // al coinquilino intestatario, che e' l'unico obbligato.
+  if (housing.sharing && !housing.sharing.onContract) {
     return { registrationTax: 0, stampDuty: 0 };
   }
 
@@ -306,16 +425,23 @@ export function registrationCosts(args: {
       ? 1 - CONCORDATO_TAX_REDUCTION
       : 1;
 
+  // Il minimo di legge vale per il **contratto**, non per persona: va quindi
+  // applicato prima di ripartire fra coinquilini. Calcolarlo sulla singola
+  // quota farebbe scattare i 67 euro a ognuno, gonfiando il conto di tutti.
   const gross = Math.max(
     annualRent * reduction * REGISTRATION_TAX_RATE,
     REGISTRATION_TAX_MIN,
   );
-  const registrationTax = gross * housing.registrationTaxShare;
+  const registrationTax = gross * housing.registrationTaxShare * rentShare;
 
-  // Il bollo si paga alla stipula e a ogni rinnovo, non ogni anno.
+  // Il bollo si paga alla stipula e a ogni rinnovo, non ogni anno, ed e'
+  // anch'esso un costo del contratto da ripartire.
   const stampDuty =
     isFirstYear || isRenewalYear
-      ? STAMP_DUTY_PER_COPY * STAMP_DUTY_COPIES * housing.registrationTaxShare
+      ? STAMP_DUTY_PER_COPY *
+        STAMP_DUTY_COPIES *
+        housing.registrationTaxShare *
+        rentShare
       : 0;
 
   return { registrationTax, stampDuty };

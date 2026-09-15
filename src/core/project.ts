@@ -12,9 +12,10 @@ import {
   uncertaintyBand,
   type RateDecomposition,
 } from './model.js';
-import { buildRentSchedule, contractLabel } from './rent.js';
+import { buildRentSchedule, computeShare, contractLabel } from './rent.js';
 import type {
   Attribution,
+  CategoryId,
   CategoryModel,
   CategoryYearProjection,
   DataSnapshot,
@@ -102,6 +103,11 @@ export function project(
   );
 
   // --- Abitazione -----------------------------------------------------------
+  // Le incoerenze nelle metrature della coabitazione vanno mostrate
+  // all'utente, non assorbite in silenzio.
+  for (const w of computeShare(profile.housing).warnings) {
+    if (!warnings.includes(w)) warnings.push(w);
+  }
   const initialRent = resolveInitialRent(profile, snapshot, warnings);
   const rentSchedule = buildRentSchedule({
     housing: profile.housing,
@@ -130,6 +136,21 @@ export function project(
     }
     pathByCategory.set(item.category, cumulativeIndex(model, anchor, horizon));
   }
+
+  /**
+   * Percorso dei prezzi di una voce: la previsione del modello, oppure il
+   * tasso costante scelto dall'utente se ha deciso di sostituirla.
+   */
+  const pathForItem = (
+    item: ExpenseItem,
+  ): ReturnType<typeof cumulativeIndex> => {
+    if (item.growthOverride === null) return pathByCategory.get(item.category)!;
+    const g = item.growthOverride;
+    return Array.from({ length: horizon + 1 }, (_, k) => ({
+      level: Math.pow(1 + g, k),
+      rate: { anchor: 0, spread: 0, persistence: 0, total: k === 0 ? 0 : g },
+    }));
+  };
 
   const years: YearProjection[] = [];
   let wealth = profile.initialSavings;
@@ -164,7 +185,6 @@ export function project(
         naive,
         rentDecomp,
         h,
-        0,
       );
       // Lo scarto residuo fra canone di mercato e canone contrattuale e'
       // l'effetto delle regole del contratto.
@@ -186,11 +206,16 @@ export function project(
     // Tutte le altre voci.
     for (const item of items) {
       const model = modelFor(models, item.category) ?? headlineModel;
-      const path = pathByCategory.get(item.category)!;
+      const overridden = item.growthOverride !== null;
+      const path = pathForItem(item);
       const base = item.monthlyAmount * 12;
-      const realFactor = Math.pow(1 + item.realGrowth, h);
-      const nominal = base * path[h]!.level * realFactor;
-      const band = uncertaintyBand(model, h, confidence);
+      const nominal = base * path[h]!.level;
+      // Con un tasso scelto dall'utente l'incertezza del modello non si
+      // applica: l'ipotesi e' sua, e disegnarle intorno una banda statistica
+      // suggerirebbe una precisione che non esiste.
+      const band = overridden
+        ? { lo: 1, hi: 1 }
+        : uncertaintyBand(model, h, confidence);
       const decomp = h === 0 ? zeroRate() : path[h]!.rate;
 
       categories.push({
@@ -201,7 +226,7 @@ export function project(
         real: nominal / priceLevel,
         lo: nominal * band.lo,
         hi: nominal * band.hi,
-        attribution: splitAttribution(base, nominal, decomp, h, item.realGrowth),
+        attribution: splitAttribution(base, nominal, decomp, h, overridden),
         rate: decomp.total,
       });
     }
@@ -274,42 +299,42 @@ function splitAttribution(
   final: number,
   rate: RateDecomposition,
   h: number,
-  realGrowth: number,
+  overridden = false,
 ): Attribution {
-  if (h === 0) {
-    return {
-      base,
-      fromAnchor: 0,
-      fromSpread: 0,
-      fromPersistence: 0,
-      fromRealGrowth: 0,
-      fromContract: 0,
-    };
-  }
+  const empty: Attribution = {
+    base,
+    fromAnchor: 0,
+    fromSpread: 0,
+    fromPersistence: 0,
+    fromOverride: 0,
+    fromContract: 0,
+  };
+  if (h === 0) return empty;
 
   const delta = final - base;
-  // Quota della crescita reale sul totale della crescita composta.
-  const priceComponent = rate.anchor + rate.spread + rate.persistence;
-  const totalComponent = priceComponent + realGrowth;
-  const realShare =
-    Math.abs(totalComponent) < 1e-12 ? 0 : realGrowth / totalComponent;
-  const fromRealGrowth = delta * realShare;
-  const priceDelta = delta - fromRealGrowth;
 
+  // Se l'utente ha imposto il tasso non c'e' nulla da scomporre: l'intero
+  // aumento discende dalla sua ipotesi, non dal modello.
+  if (overridden) return { ...empty, fromOverride: delta };
+
+  const priceComponent = rate.anchor + rate.spread + rate.persistence;
   const denom = Math.abs(priceComponent) < 1e-12 ? 1 : priceComponent;
   return {
     base,
-    fromAnchor: (priceDelta * rate.anchor) / denom,
-    fromSpread: (priceDelta * rate.spread) / denom,
-    fromPersistence: (priceDelta * rate.persistence) / denom,
-    fromRealGrowth,
+    fromAnchor: (delta * rate.anchor) / denom,
+    fromSpread: (delta * rate.spread) / denom,
+    fromPersistence: (delta * rate.persistence) / denom,
+    fromOverride: 0,
     fromContract: 0,
   };
 }
 
 /**
- * Determina il canone iniziale: se l'utente non lo specifica, lo stima dal
- * costo medio al metro quadro della citta' e della zona scelte.
+ * Determina il canone iniziale dell'**intera** abitazione: se l'utente non lo
+ * specifica, lo stima dal costo medio al metro quadro della citta' e della
+ * zona scelte. La ripartizione fra coinquilini avviene piu' a valle, in
+ * `buildRentSchedule`, perche' alcune regole (il minimo dell'imposta di
+ * registro) vivono a livello di contratto.
  */
 export function resolveInitialRent(
   profile: Profile,
@@ -330,6 +355,31 @@ export function resolveInitialRent(
   }
   const perM2 = city.eurM2Month[h.zone];
   return perM2 * h.sqm;
+}
+
+/**
+ * Crescita annua media prevista dal modello per ciascuna categoria,
+ * sull'orizzonte indicato.
+ *
+ * Il modello prevede un tasso diverso ogni anno, perche' lo scostamento
+ * iniziale rientra gradualmente. Per mostrare all'utente un numero solo si
+ * usa il tasso composto equivalente: quello che, applicato costante, porta
+ * allo stesso livello finale. E' il valore che determina davvero la spesa a
+ * fine orizzonte, ed e' quindi quello onesto da esporre.
+ */
+export function forecastRatesByCategory(
+  models: CategoryModel[],
+  anchor: number,
+  horizon: number,
+): Map<CategoryId, number> {
+  const out = new Map<CategoryId, number>();
+  if (horizon <= 0) return out;
+  for (const m of models) {
+    const path = cumulativeIndex(m, anchor, horizon);
+    const level = path[horizon]!.level;
+    out.set(m.category, Math.pow(level, 1 / horizon) - 1);
+  }
+  return out;
 }
 
 /** Riepilogo compatto di un profilo, per la tabella di confronto. */

@@ -8,8 +8,13 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
-import { project } from '../core/project.js';
-import type { DataSnapshot, Profile, ProjectionResult } from '../core/types.js';
+import { forecastRatesByCategory, project } from '../core/project.js';
+import type {
+  CategoryId,
+  DataSnapshot,
+  Profile,
+  ProjectionResult,
+} from '../core/types.js';
 import { loadSnapshot } from '../data/load.js';
 import { Compare } from './Compare.js';
 import { ConfigPanel } from './ConfigPanel.js';
@@ -80,6 +85,16 @@ export function App(): JSX.Element {
   }, [snapshot, profiles, baseYear, horizon, anchorOverride, confidence]);
 
   const activeResult = results.find((r) => r.profileId === activeId) ?? results[0];
+
+  // Previsione per categoria, mostrata accanto a ogni voce di spesa: cosi'
+  // la stima del modello e' visibile gia' in configurazione.
+  const forecastRates = useMemo(
+    () =>
+      activeResult
+        ? forecastRatesByCategory(activeResult.models, activeResult.anchor, horizon)
+        : new Map<CategoryId, number>(),
+    [activeResult, horizon],
+  );
 
   if (error) {
     return (
@@ -286,7 +301,11 @@ export function App(): JSX.Element {
       </div>
 
       {tab === 'config' && (
-        <ConfigPanel profile={active} onChange={updateActive} />
+        <ConfigPanel
+          profile={active}
+          onChange={updateActive}
+          forecastRates={forecastRates}
+        />
       )}
       {tab === 'previsione' && activeResult && (
         <Forecast result={activeResult} real={real} />

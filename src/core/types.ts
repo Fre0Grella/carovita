@@ -132,16 +132,55 @@ export type ContractType =
 
 export type ZoneTier = 'centro' | 'semicentro' | 'periferia';
 
+/**
+ * Coabitazione: come si ripartisce il canone fra coinquilini.
+ *
+ * In Italia la quota non si divide quasi mai in parti uguali: chi ha la
+ * singola grande paga più di chi sta in una doppia. Il criterio che si usa
+ * davvero, quando si tratta, è «la mia camera più la mia parte di spazi
+ * comuni», ed è quello modellato qui.
+ */
+export interface SharingConfig {
+  /** Metratura della camera che occupi, in m². */
+  roomSqm: number;
+  /**
+   * La camera è doppia: la metratura privata pro capite è la metà, perché
+   * quello spazio lo dividi con un'altra persona.
+   */
+  roomShared: boolean;
+  /**
+   * Somma delle metrature di tutte le camere da letto, in m². Serve a
+   * ricavare per differenza gli spazi comuni (cucina, bagni, corridoio).
+   */
+  bedroomsSqm: number;
+  /** Numero totale di persone che vivono in casa. */
+  occupants: number;
+  /**
+   * Sei intestatario o cointestatario del contratto. Se non lo sei (paghi a
+   * un coinquilino che ha firmato), non ti spetta alcuna imposta di registro
+   * né di bollo.
+   */
+  onContract: boolean;
+}
+
 export interface HousingConfig {
   contractType: ContractType;
   /** Codice ISTAT del comune di residenza. */
   istatCode: string;
   zone: ZoneTier;
-  /** Superficie in m². */
+  /** Superficie dell'intera abitazione, in m². */
   sqm: number;
   /**
-   * Canone mensile iniziale in EUR. Se `null`, viene stimato da
-   * `eurM2Month[zone] * sqm` per il comune scelto.
+   * Se valorizzato, l'abitazione è condivisa con altri e i costi del
+   * contratto (canone, imposte, condominio) vengono ripartiti.
+   * `null` significa che l'abitazione è tutta tua.
+   */
+  sharing: SharingConfig | null;
+  /**
+   * Canone mensile dell'**intera abitazione** in EUR, cioè la cifra che
+   * risulta dal contratto. In coabitazione non è quanto paghi tu: la tua
+   * quota viene calcolata da `sharing`. Se `null`, il canone viene stimato
+   * da `eurM2Month[zone] * sqm` per il comune scelto.
    */
   monthlyRent: number | null;
   /**
@@ -174,10 +213,17 @@ export interface ExpenseItem {
   /** Spesa mensile corrente in EUR (valore nominale di oggi). */
   monthlyAmount: number;
   /**
-   * Crescita reale annua aggiuntiva, in frazione (es. 0.01 = +1%/anno oltre
-   * l'inflazione). Serve a modellare cambiamenti di stile di vita.
+   * Tasso di crescita annuo imposto dall'utente, in frazione.
+   *
+   * `null` significa «usa la previsione del modello per questa
+   * categoria», ed è il caso normale: l'energia viene proiettata con
+   * la dinamica dell'energia, gli alimentari con quella degli alimentari.
+   *
+   * Un valore esplicito sostituisce quella previsione con la propria, quando
+   * si sa già che quella voce seguirà una strada sua: un abbonamento
+   * che scade, un figlio all'asilo, un'auto da mantenere.
    */
-  realGrowth: number;
+  growthOverride: number | null;
 }
 
 export interface IncomeConfig {
@@ -258,8 +304,11 @@ export interface Attribution {
   fromSpread: number;
   /** Contributo della persistenza (partenza da un gap non nullo), in EUR. */
   fromPersistence: number;
-  /** Contributo della crescita reale impostata dall'utente, in EUR. */
-  fromRealGrowth: number;
+  /**
+   * Contributo dell'ipotesi di crescita imposta dall'utente, in EUR.
+   * Valorizzato solo quando la previsione del modello è stata sostituita.
+   */
+  fromOverride: number;
   /** Contributo di effetti contrattuali (scatti e reset del canone), in EUR. */
   fromContract: number;
 }

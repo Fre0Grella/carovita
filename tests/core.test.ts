@@ -16,15 +16,17 @@ import {
   ISTAT_INDEXATION_CAP,
   REGISTRATION_TAX_MIN,
   buildRentSchedule,
+  computeShare,
   contractTerm,
   registrationCosts,
 } from '../src/core/rent.js';
-import { project } from '../src/core/project.js';
+import { forecastRatesByCategory, project } from '../src/core/project.js';
 import type {
   DataSnapshot,
   HousingConfig,
   IndexSeries,
   Profile,
+  SharingConfig,
 } from '../src/core/types.js';
 
 // ---------------------------------------------------------------------------
@@ -90,6 +92,7 @@ const baseHousing: HousingConfig = {
   registrationTaxShare: 0.5,
   highTensionMunicipality: false,
   condoFees: 0,
+  sharing: null,
 };
 
 function makeProfile(overrides: Partial<Profile> = {}): Profile {
@@ -105,7 +108,7 @@ function makeProfile(overrides: Partial<Profile> = {}): Profile {
         label: 'Spesa alimentare',
         category: 'food',
         monthlyAmount: 300,
-        realGrowth: 0,
+        growthOverride: null,
       },
     ],
     income: {
@@ -437,7 +440,7 @@ describe('project', () => {
           a.fromAnchor +
           a.fromSpread +
           a.fromPersistence +
-          a.fromRealGrowth +
+          a.fromOverride +
           a.fromContract;
         expect(sum).toBeCloseTo(c.nominal, 6);
       }
@@ -556,5 +559,231 @@ describe('project', () => {
     // 60 m2 * 19 EUR/m2 = 1140 al mese, piu' l'imposta di registro.
     expect(rent!.nominal).toBeGreaterThan(1140 * 12);
     expect(rent!.nominal).toBeLessThan(1140 * 12 * 1.1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Coabitazione
+// ---------------------------------------------------------------------------
+
+describe('coabitazione', () => {
+  const marketIndex = Array.from({ length: 21 }, (_, h) => Math.pow(1.03, h));
+  const foiRates = Array.from({ length: 21 }, () => 0.02);
+  const condoIndex = Array.from({ length: 21 }, () => 1);
+
+  /** Appartamento di 90 m2, 48 m2 di camere, 4 persone. */
+  function flat(sharing: Partial<SharingConfig>): HousingConfig {
+    return {
+      ...baseHousing,
+      sqm: 90,
+      sharing: {
+        roomSqm: 14,
+        roomShared: false,
+        bedroomsSqm: 48,
+        occupants: 4,
+        onContract: true,
+        ...sharing,
+      },
+    };
+  }
+
+  it('senza coabitazione la quota e’ intera', () => {
+    expect(computeShare(baseHousing).rentShare).toBe(1);
+  });
+
+  it('somma camera privata e parte di spazi comuni', () => {
+    const s = computeShare(flat({}));
+    // 14 m2 di camera + (90 - 48) / 4 = 10,5 m2 di spazi comuni = 24,5 su 90.
+    expect(s.privateSqm).toBeCloseTo(14, 6);
+    expect(s.commonSqm).toBeCloseTo(10.5, 6);
+    expect(s.rentShare).toBeCloseTo(24.5 / 90, 6);
+  });
+
+  it('la camera doppia conta per meta’', () => {
+    const singola = computeShare(flat({ roomSqm: 18, roomShared: false }));
+    const doppia = computeShare(flat({ roomSqm: 18, roomShared: true }));
+    expect(doppia.privateSqm).toBeCloseTo(9, 6);
+    expect(doppia.rentShare).toBeLessThan(singola.rentShare);
+  });
+
+  it('le quote di tutti i coinquilini sommano esattamente a 1', () => {
+    // Due singole da 14 e 16 m2 e una doppia da 18 m2 occupata da due
+    // persone: 48 m2 di camere, 4 persone, 90 m2 totali.
+    const quote = [
+      computeShare(flat({ roomSqm: 14 })).rentShare,
+      computeShare(flat({ roomSqm: 16 })).rentShare,
+      computeShare(flat({ roomSqm: 18, roomShared: true })).rentShare,
+      computeShare(flat({ roomSqm: 18, roomShared: true })).rentShare,
+    ];
+    expect(quote.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 10);
+  });
+
+  it('segnala metrature incoerenti invece di produrre numeri assurdi', () => {
+    const s = computeShare(flat({ bedroomsSqm: 200 }));
+    expect(s.warnings.length).toBeGreaterThan(0);
+    expect(s.rentShare).toBeGreaterThan(0);
+    expect(s.rentShare).toBeLessThanOrEqual(1);
+  });
+
+  it('applica il minimo di legge al contratto, non alla singola quota', () => {
+    // Canone basso: il 2% dell'intero contratto sta sotto i 67 euro, quindi
+    // il minimo scatta una volta sola e poi si divide.
+    const housing = flat({});
+    const share = computeShare(housing).rentShare;
+    const { registrationTax } = registrationCosts({
+      housing: { ...housing, registrationTaxShare: 1 },
+      annualRent: 3000,
+      isFirstYear: true,
+      isRenewalYear: false,
+      rentShare: share,
+    });
+    expect(registrationTax).toBeCloseTo(REGISTRATION_TAX_MIN * share, 6);
+    // Senza ripartizione ognuno pagherebbe l'intero minimo.
+    expect(registrationTax).toBeLessThan(REGISTRATION_TAX_MIN);
+  });
+
+  it('chi non e’ sul contratto non paga imposte', () => {
+    const housing = flat({ onContract: false });
+    const { registrationTax, stampDuty } = registrationCosts({
+      housing,
+      annualRent: 14_400,
+      isFirstYear: true,
+      isRenewalYear: false,
+      rentShare: computeShare(housing).rentShare,
+    });
+    expect(registrationTax).toBe(0);
+    expect(stampDuty).toBe(0);
+  });
+
+  it('riporta sia il canone dell’appartamento sia la tua quota', () => {
+    const housing = flat({});
+    const share = computeShare(housing).rentShare;
+    const sched = buildRentSchedule({
+      housing,
+      initialMonthlyRent: 1200,
+      baseYear: 2026,
+      horizon: 3,
+      marketIndex,
+      foiRates,
+      condoIndex,
+    });
+    expect(sched[0]!.apartmentMonthlyRent).toBeCloseTo(1200, 6);
+    expect(sched[0]!.monthlyRent).toBeCloseTo(1200 * share, 6);
+  });
+
+  it('divide le spese condominiali in parti uguali', () => {
+    const sched = buildRentSchedule({
+      housing: { ...flat({}), condoFees: 120 },
+      initialMonthlyRent: 1200,
+      baseYear: 2026,
+      horizon: 1,
+      marketIndex,
+      foiRates,
+      condoIndex,
+    });
+    // 120 al mese per l'appartamento, 4 persone: 30 a testa, 360 l'anno.
+    expect(sched[0]!.condoFees).toBeCloseTo(360, 6);
+  });
+
+  it('lo scatto ISTAT si applica al canone intero e poi si ripartisce', () => {
+    const housing = { ...flat({}), cedolareSecca: false, istatIndexation: true };
+    const share = computeShare(housing).rentShare;
+    const sched = buildRentSchedule({
+      housing,
+      initialMonthlyRent: 1200,
+      baseYear: 2026,
+      horizon: 1,
+      marketIndex,
+      foiRates,
+      condoIndex,
+    });
+    const atteso = 1200 * (1 + ISTAT_INDEXATION_CAP * 0.02);
+    expect(sched[1]!.apartmentMonthlyRent).toBeCloseTo(atteso, 6);
+    expect(sched[1]!.monthlyRent).toBeCloseTo(atteso * share, 6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Sostituzione della previsione
+// ---------------------------------------------------------------------------
+
+describe('override della crescita', () => {
+  function withGrowth(g: number | null): Profile {
+    return makeProfile({
+      expenses: [
+        {
+          id: 'e1',
+          label: 'Bolletta',
+          category: 'food',
+          monthlyAmount: 100,
+          growthOverride: g,
+        },
+      ],
+    });
+  }
+
+  it('senza override usa la previsione del modello', () => {
+    const res = project(withGrowth(null), makeSnapshot());
+    const c = res.years[5]!.categories.find((x) => x.label === 'Bolletta')!;
+    // La serie di test cresce del 2% e l'ancora e' 2%: il modello prevede 2%.
+    expect(c.nominal).toBeCloseTo(1200 * Math.pow(1.02, 5), 2);
+  });
+
+  it('con override applica esattamente il tasso scelto', () => {
+    const res = project(withGrowth(0.05), makeSnapshot());
+    const c = res.years[5]!.categories.find((x) => x.label === 'Bolletta')!;
+    expect(c.nominal).toBeCloseTo(1200 * Math.pow(1.05, 5), 6);
+    expect(c.rate).toBeCloseTo(0.05, 10);
+  });
+
+  it('un override a zero congela davvero la voce', () => {
+    // Distingue "nessun override" (null) da "crescita zero" (0): senza la
+    // distinzione, congelare una spesa sarebbe impossibile.
+    const res = project(withGrowth(0), makeSnapshot());
+    const c = res.years[10]!.categories.find((x) => x.label === 'Bolletta')!;
+    expect(c.nominal).toBeCloseTo(1200, 6);
+  });
+
+  it('attribuisce tutto l\u2019aumento all\u2019ipotesi dell\u2019utente', () => {
+    const res = project(withGrowth(0.05), makeSnapshot());
+    const c = res.years[5]!.categories.find((x) => x.label === 'Bolletta')!;
+    const a = c.attribution;
+    expect(a.fromOverride).toBeCloseTo(c.nominal - a.base, 6);
+    expect(a.fromAnchor).toBe(0);
+    expect(a.fromSpread).toBe(0);
+    expect(a.fromPersistence).toBe(0);
+  });
+
+  it('non disegna bande statistiche attorno a un\u2019ipotesi personale', () => {
+    const res = project(withGrowth(0.05), makeSnapshot());
+    const c = res.years[8]!.categories.find((x) => x.label === 'Bolletta')!;
+    expect(c.lo).toBeCloseTo(c.nominal, 6);
+    expect(c.hi).toBeCloseTo(c.nominal, 6);
+  });
+
+  it('l\u2019attribuzione chiude comunque sul totale', () => {
+    const res = project(withGrowth(0.04), makeSnapshot());
+    for (const y of res.years) {
+      for (const c of y.categories) {
+        const a = c.attribution;
+        const sum =
+          a.base +
+          a.fromAnchor +
+          a.fromSpread +
+          a.fromPersistence +
+          a.fromOverride +
+          a.fromContract;
+        expect(sum).toBeCloseTo(c.nominal, 6);
+      }
+    }
+  });
+
+  it('forecastRatesByCategory restituisce il tasso composto equivalente', () => {
+    const snap = makeSnapshot();
+    const res = project(makeProfile(), snap);
+    const rates = forecastRatesByCategory(res.models, res.anchor, 15);
+    const food = rates.get('food')!;
+    // Serie di test al 2% con ancora al 2%: il composto equivalente e' 2%.
+    expect(food).toBeCloseTo(0.02, 4);
   });
 });

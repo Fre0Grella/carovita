@@ -139,7 +139,7 @@ d('snapshot reale', () => {
           a.fromAnchor +
           a.fromSpread +
           a.fromPersistence +
-          a.fromRealGrowth +
+          a.fromOverride +
           a.fromContract;
         expect(sum).toBeCloseTo(c.nominal, 4);
       }

@@ -328,11 +328,13 @@ function Attribution({
         'verso il suo valore di lungo periodo.',
     },
     {
-      key: 'real',
-      label: 'Cambio di stile di vita',
-      value: a.fromRealGrowth,
+      key: 'override',
+      label: 'La tua ipotesi di crescita',
+      value: a.fromOverride,
       color: 'var(--series-7)',
-      why: 'La crescita reale che hai impostato tu per questa voce.',
+      why:
+        'Per questa voce hai sostituito la previsione del modello con un ' +
+        'tasso tuo, quindi l’aumento discende interamente da quella scelta.',
     },
     {
       key: 'contract',

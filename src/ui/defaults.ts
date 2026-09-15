@@ -61,7 +61,7 @@ function item(
   category: CategoryId,
   monthlyAmount: number,
 ): ExpenseItem {
-  return { id, label, category, monthlyAmount, realGrowth: 0 };
+  return { id, label, category, monthlyAmount, growthOverride: null };
 }
 
 export function makeDefaultProfile(index = 0): Profile {
@@ -80,6 +80,7 @@ export function makeDefaultProfile(index = 0): Profile {
       registrationTaxShare: 0.5,
       highTensionMunicipality: true,
       condoFees: 60,
+      sharing: null,
     },
     utilities: [
       item('u-energia', 'Elettricità e gas', 'utilities', 110),
@@ -126,6 +127,20 @@ export function loadState(): StoredState | null {
     const parsed = JSON.parse(raw) as StoredState;
     if (!Array.isArray(parsed.profiles) || parsed.profiles.length === 0) {
       return null;
+    }
+    // Profili salvati prima che esistesse la coabitazione: si normalizzano
+    // invece di scartarli, altrimenti l'utente perderebbe la configurazione
+    // al primo aggiornamento dell'applicazione.
+    for (const p of parsed.profiles) {
+      if (p.housing && p.housing.sharing === undefined) p.housing.sharing = null;
+      // `realGrowth` (crescita reale aggiuntiva) e' stato sostituito da un
+      // override esplicito del tasso di crescita: i vecchi valori non hanno
+      // un equivalente diretto, quindi si torna alla previsione del modello.
+      for (const it of [...(p.utilities ?? []), ...(p.expenses ?? [])]) {
+        const legacy = it as unknown as { realGrowth?: number };
+        if (it.growthOverride === undefined) it.growthOverride = null;
+        delete legacy.realGrowth;
+      }
     }
     return parsed;
   } catch {
