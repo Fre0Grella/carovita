@@ -342,8 +342,41 @@ export interface ProjectionEvent {
   amount?: number;
 }
 
+/**
+ * Un periodo di proiezione: dodici mesi a partire dal mese di riferimento,
+ * non un anno solare.
+ *
+ * Partire da gennaio darebbe un conto sbagliato per chi apre l'applicazione a
+ * settembre: verrebbe imputata una spesa annua intera a un anno di cui restano
+ * tre mesi. I periodi scorrono quindi dal mese corrente, e l'ultimo può
+ * essere parziale quando l'orizzonte non è un numero intero di anni.
+ */
+export interface Period {
+  index: number;
+  /** Primo mese del periodo, `YYYY-MM`. */
+  startMonth: string;
+  /** Ultimo mese compreso nel periodo, `YYYY-MM`. */
+  endMonth: string;
+  /** Anno solare in cui il periodo inizia. */
+  year: number;
+  /** Etichetta breve, es. `set 2026`. */
+  label: string;
+  /** Etichetta estesa, es. `set 2026 - ago 2027`. */
+  labelLong: string;
+  /** Quota di anno coperta: 1 per un periodo pieno, meno per l'ultimo. */
+  fraction: number;
+  /** Mesi effettivamente coperti. */
+  months: number;
+}
+
 export interface YearProjection {
   year: number;
+  /** Etichetta breve del periodo, per gli assi dei grafici. */
+  label: string;
+  /** Etichetta estesa del periodo, per i suggerimenti. */
+  labelLong: string;
+  /** Quota di anno coperta dal periodo (1 = dodici mesi). */
+  fraction: number;
   /** Indice dei prezzi generale cumulato rispetto all'anno base (1 = base). */
   priceLevel: number;
   totalNominal: number;
@@ -373,6 +406,11 @@ export interface YearProjection {
 export interface ProjectionResult {
   profileId: string;
   profileName: string;
+  /** Mese di partenza della proiezione, `YYYY-MM`. */
+  startMonth: string;
+  /** Ultimo mese coperto dalla proiezione, `YYYY-MM`. */
+  endMonth: string;
+  /** Anno solare in cui la proiezione inizia. */
   baseYear: number;
   years: YearProjection[];
   models: CategoryModel[];
@@ -390,9 +428,12 @@ export interface ProjectionResult {
 
 /** Impostazioni dello scenario di proiezione. */
 export interface ScenarioSettings {
-  /** Anno base della proiezione. */
-  baseYear: number;
-  /** Orizzonte in anni. */
+  /**
+   * Mese di partenza della proiezione, `YYYY-MM`. Normalmente il mese
+   * corrente: i conti partono da oggi, non dall'inizio dell'anno solare.
+   */
+  startMonth: string;
+  /** Orizzonte in anni, anche frazionario (1.5 = diciotto mesi). */
   horizon: number;
   /**
    * Ancora di inflazione di lungo periodo, in frazione. Se `null` usa quella

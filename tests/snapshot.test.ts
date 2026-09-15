@@ -123,12 +123,14 @@ d('snapshot reale', () => {
 
   it('produce una proiezione completa e finita sul profilo di esempio', () => {
     const res = project(makeDefaultProfile(0), snapshot!, {
-      baseYear: 2026,
+      startMonth: '2026-01',
       horizon: 15,
       anchorOverride: null,
       confidence: 0.8,
     });
-    expect(res.years.length).toBe(16);
+    // Orizzonte di 15 anni = 15 periodi da dodici mesi, non 16: il primo
+    // parte dal mese corrente, non dal gennaio precedente.
+    expect(res.years.length).toBe(15);
     for (const y of res.years) {
       expect(Number.isFinite(y.totalNominal)).toBe(true);
       expect(y.totalNominal).toBeGreaterThan(0);
@@ -151,7 +153,7 @@ d('snapshot reale', () => {
 
   it('la spesa cresce a un ritmo credibile, non esplosivo', () => {
     const res = project(makeDefaultProfile(0), snapshot!, {
-      baseYear: 2026,
+      startMonth: '2026-01',
       horizon: 20,
       anchorOverride: null,
       confidence: 0.8,
@@ -203,12 +205,12 @@ d('snapshot reale', () => {
     // Sommare gli estremi assume che tutte le categorie sbaglino insieme:
     // sovrastima l’incertezza, e sul patrimonio l’errore si vede.
     const res = project(makeDefaultProfile(0), snapshot!, {
-      baseYear: 2026,
+      startMonth: '2026-01',
       horizon: 15,
       anchorOverride: null,
       confidence: 0.8,
     });
-    const y = res.years[15]!;
+    const y = res.years[res.years.length - 1]!;
     const sommaEstremi = y.categories.reduce((a, c) => a + c.lo, 0);
     expect(y.totalLo).toBeGreaterThan(sommaEstremi);
     expect(y.totalLo).toBeLessThan(y.totalNominal);
@@ -216,7 +218,7 @@ d('snapshot reale', () => {
 
   it('il patrimonio ha una banda coerente col segno della spesa', () => {
     const res = project(makeDefaultProfile(0), snapshot!, {
-      baseYear: 2026,
+      startMonth: '2026-01',
       horizon: 15,
       anchorOverride: null,
       confidence: 0.8,

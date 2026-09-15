@@ -23,6 +23,7 @@ import {
   registrationCosts,
 } from '../src/core/rent.js';
 import {
+  buildPeriods,
   forecastRatesByCategory,
   project,
   summarize,
@@ -262,8 +263,7 @@ describe('rent', () => {
     const sched = buildRentSchedule({
       housing: { ...baseHousing },
       initialMonthlyRent: 1000,
-      baseYear: 2026,
-      horizon: 1,
+      periods: buildPeriods('2026-01', 2),
       marketIndex,
       foiRates,
       condoIndex,
@@ -277,8 +277,7 @@ describe('rent', () => {
     const sched = buildRentSchedule({
       housing: { ...baseHousing, cedolareSecca: true },
       initialMonthlyRent: 1000,
-      baseYear: 2026,
-      horizon: 5, // dentro il ciclo 4+4, prima del rinnovo
+      periods: buildPeriods('2026-01', 6), // dentro il ciclo 4+4
       marketIndex,
       foiRates,
       condoIndex,
@@ -294,8 +293,7 @@ describe('rent', () => {
     const sched = buildRentSchedule({
       housing: { ...baseHousing, istatIndexation: false },
       initialMonthlyRent: 900,
-      baseYear: 2026,
-      horizon: 4, // dentro il primo ciclo: nessun riallineamento di mercato
+      periods: buildPeriods('2026-01', 5), // dentro il primo ciclo
       marketIndex,
       foiRates,
       condoIndex,
@@ -307,8 +305,7 @@ describe('rent', () => {
     const sched = buildRentSchedule({
       housing: { ...baseHousing },
       initialMonthlyRent: 1000,
-      baseYear: 2026,
-      horizon: 10,
+      periods: buildPeriods('2026-01', 11),
       marketIndex,
       foiRates,
       condoIndex,
@@ -326,8 +323,7 @@ describe('rent', () => {
     const sched = buildRentSchedule({
       housing: { ...baseHousing },
       initialMonthlyRent: 1000,
-      baseYear: 2026,
-      horizon: 6,
+      periods: buildPeriods('2026-01', 7),
       marketIndex,
       foiRates,
       condoIndex,
@@ -382,8 +378,7 @@ describe('rent', () => {
     const sched = buildRentSchedule({
       housing: { ...baseHousing, contractType: 'proprieta', condoFees: 100 },
       initialMonthlyRent: 0,
-      baseYear: 2026,
-      horizon: 3,
+      periods: buildPeriods('2026-01', 4),
       marketIndex,
       foiRates,
       condoIndex,
@@ -399,8 +394,7 @@ describe('rent', () => {
     const sched = buildRentSchedule({
       housing: { ...baseHousing, cedolareSecca: true },
       initialMonthlyRent: 1000,
-      baseYear: 2026,
-      horizon: 10,
+      periods: buildPeriods('2026-01', 11),
       marketIndex,
       foiRates,
       condoIndex,
@@ -415,8 +409,7 @@ describe('rent', () => {
     const sched = buildRentSchedule({
       housing: { ...baseHousing, condoFees: 100 },
       initialMonthlyRent: 1000,
-      baseYear: 2026,
-      horizon: 10,
+      periods: buildPeriods('2026-01', 11),
       marketIndex,
       foiRates,
       condoIndex: growing,
@@ -477,13 +470,13 @@ describe('project', () => {
   it('un’ancora piu’ alta produce una spesa nominale maggiore', () => {
     const snap = makeSnapshot();
     const low = project(makeProfile(), snap, {
-      baseYear: 2026,
+      startMonth: '2026-01',
       horizon: 10,
       anchorOverride: 0.01,
       confidence: 0.8,
     });
     const high = project(makeProfile(), snap, {
-      baseYear: 2026,
+      startMonth: '2026-01',
       horizon: 10,
       anchorOverride: 0.05,
       confidence: 0.8,
@@ -667,8 +660,7 @@ describe('coabitazione', () => {
     const sched = buildRentSchedule({
       housing,
       initialMonthlyRent: 1200,
-      baseYear: 2026,
-      horizon: 3,
+      periods: buildPeriods('2026-01', 4),
       marketIndex,
       foiRates,
       condoIndex,
@@ -681,8 +673,7 @@ describe('coabitazione', () => {
     const sched = buildRentSchedule({
       housing: { ...flat({}), condoFees: 120 },
       initialMonthlyRent: 1200,
-      baseYear: 2026,
-      horizon: 1,
+      periods: buildPeriods('2026-01', 2),
       marketIndex,
       foiRates,
       condoIndex,
@@ -697,8 +688,7 @@ describe('coabitazione', () => {
     const sched = buildRentSchedule({
       housing,
       initialMonthlyRent: 1200,
-      baseYear: 2026,
-      horizon: 1,
+      periods: buildPeriods('2026-01', 2),
       marketIndex,
       foiRates,
       condoIndex,
@@ -921,5 +911,113 @@ describe('aggregazione delle bande', () => {
     const rho = averageCategoryCorrelation(makeSnapshot());
     expect(rho).toBeGreaterThanOrEqual(0);
     expect(rho).toBeLessThanOrEqual(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Periodi di proiezione
+// ---------------------------------------------------------------------------
+
+describe('periodi', () => {
+  it('parte dal mese indicato, non da gennaio', () => {
+    const p = buildPeriods('2026-09', 2);
+    expect(p[0]!.startMonth).toBe('2026-09');
+    expect(p[0]!.endMonth).toBe('2027-08');
+    expect(p[1]!.startMonth).toBe('2027-09');
+  });
+
+  it('etichetta i periodi in italiano', () => {
+    const p = buildPeriods('2026-09', 1);
+    expect(p[0]!.label).toBe('set 2026');
+    expect(p[0]!.labelLong).toBe('set 2026 - ago 2027');
+  });
+
+  it('un orizzonte intero produce solo periodi pieni', () => {
+    const p = buildPeriods('2026-09', 3);
+    expect(p).toHaveLength(3);
+    expect(p.every((x) => x.fraction === 1 && x.months === 12)).toBe(true);
+  });
+
+  it('un anno e mezzo produce un periodo pieno e uno di sei mesi', () => {
+    const p = buildPeriods('2026-09', 1.5);
+    expect(p).toHaveLength(2);
+    expect(p[0]!.fraction).toBe(1);
+    expect(p[1]!.fraction).toBeCloseTo(0.5, 10);
+    expect(p[1]!.months).toBe(6);
+    expect(p[1]!.labelLong).toContain('6 mesi');
+  });
+
+  it('la somma delle frazioni e\u2019 l\u2019orizzonte richiesto', () => {
+    for (const h of [1.5, 2, 3.5, 7, 15]) {
+      const tot = buildPeriods('2026-09', h).reduce((a, p) => a + p.fraction, 0);
+      expect(tot).toBeCloseTo(h, 10);
+    }
+  });
+
+  it('un periodo parziale costa in proporzione ai mesi', () => {
+    const snap = makeSnapshot();
+    const pieno = project(makeProfile(), snap, {
+      startMonth: '2026-09',
+      horizon: 2,
+      anchorOverride: 0,
+      confidence: 0.8,
+    });
+    const mezzo = project(makeProfile(), snap, {
+      startMonth: '2026-09',
+      horizon: 1.5,
+      anchorOverride: 0,
+      confidence: 0.8,
+    });
+    // Senza inflazione, il secondo periodo dimezzato costa la meta'.
+    expect(mezzo.years[1]!.totalNominal).toBeCloseTo(
+      pieno.years[1]!.totalNominal / 2,
+      6,
+    );
+  });
+
+  it('anche il reddito del periodo parziale e\u2019 proporzionato', () => {
+    // Reddito nominale fermo: l'unico effetto misurato e' la proporzione
+    // dei mesi, non l'adeguamento all'inflazione.
+    const fermo = makeProfile({
+      income: {
+        monthlyNet: 2000,
+        monthsPerYear: 13,
+        inflationPassThrough: 0,
+        realGrowth: 0,
+      },
+    });
+    const res = project(fermo, makeSnapshot(), {
+      startMonth: '2026-09',
+      horizon: 1.5,
+      anchorOverride: 0,
+      confidence: 0.8,
+    });
+    expect(res.years[1]!.incomeNominal).toBeCloseTo(
+      res.years[0]!.incomeNominal / 2,
+      6,
+    );
+  });
+
+  it('la crescita annua non e\u2019 falsata dal periodo parziale', () => {
+    // Confrontare un periodo pieno con uno dimezzato darebbe una crescita
+    // fittiziamente negativa: gli importi vanno annualizzati.
+    const res = project(makeProfile(), makeSnapshot(), {
+      startMonth: '2026-09',
+      horizon: 1.5,
+      anchorOverride: 0.02,
+      confidence: 0.8,
+    });
+    expect(summarize(res).cagr).toBeGreaterThan(0);
+  });
+
+  it('registra il mese iniziale e finale della proiezione', () => {
+    const res = project(makeProfile(), makeSnapshot(), {
+      startMonth: '2026-09',
+      horizon: 1.5,
+      anchorOverride: null,
+      confidence: 0.8,
+    });
+    expect(res.startMonth).toBe('2026-09');
+    expect(res.endMonth).toBe('2028-02');
   });
 });

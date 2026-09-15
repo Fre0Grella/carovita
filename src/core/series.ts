@@ -152,6 +152,18 @@ export function valueAt(obs: MonthlyObs[], t: string): number | null {
   return best;
 }
 
+const MESI_BREVI = [
+  'gen', 'feb', 'mar', 'apr', 'mag', 'giu',
+  'lug', 'ago', 'set', 'ott', 'nov', 'dic',
+];
+
+/** `2026-09` -> `set 2026`. */
+export function shortMonthLabel(t: string): string {
+  const y = t.slice(0, 4);
+  const m = Number(t.slice(5, 7));
+  return (MESI_BREVI[m - 1] ?? '?') + ' ' + y;
+}
+
 /** Media aritmetica. */
 export function mean(xs: number[]): number {
   if (xs.length === 0) return 0;

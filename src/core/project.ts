@@ -15,6 +15,7 @@ import {
   type RateDecomposition,
 } from './model.js';
 import { buildRentSchedule, computeShare, contractLabel } from './rent.js';
+import { monthIndex, monthLabel, shortMonthLabel } from './series.js';
 import type {
   Attribution,
   CategoryId,
@@ -22,6 +23,7 @@ import type {
   CategoryYearProjection,
   DataSnapshot,
   ExpenseItem,
+  Period,
   Profile,
   ProjectionEvent,
   ProjectionResult,
@@ -29,12 +31,56 @@ import type {
   YearProjection,
 } from './types.js';
 
+/** Mese corrente in formato `YYYY-MM`. */
+export function currentMonth(now = new Date()): string {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
 export const DEFAULT_SCENARIO: ScenarioSettings = {
-  baseYear: new Date().getFullYear(),
+  startMonth: currentMonth(),
   horizon: 15,
   anchorOverride: null,
   confidence: 0.8,
 };
+
+/**
+ * Costruisce i periodi di proiezione: finestre di dodici mesi a partire dal
+ * mese indicato.
+ *
+ * Ancorare i periodi al mese corrente invece che all'anno solare evita
+ * l'errore piu' vistoso per chi apre l'applicazione a meta' anno: imputare
+ * una spesa annua intera a un anno di cui restano pochi mesi. L'ultimo
+ * periodo puo' essere parziale, cosi' un orizzonte di un anno e mezzo copre
+ * davvero diciotto mesi e non due anni.
+ */
+export function buildPeriods(startMonth: string, horizon: number): Period[] {
+  const count = Math.max(1, Math.ceil(horizon - 1e-9));
+  const start = monthIndex(startMonth);
+  const periods: Period[] = [];
+
+  for (let k = 0; k < count; k++) {
+    const remaining = horizon - k;
+    const fraction = Math.min(1, Math.max(0, remaining));
+    const months = Math.max(1, Math.round(fraction * 12));
+    const first = monthLabel(start + k * 12);
+    const last = monthLabel(start + k * 12 + months - 1);
+    const label = shortMonthLabel(first);
+    periods.push({
+      index: k,
+      startMonth: first,
+      endMonth: last,
+      year: Number(first.slice(0, 4)),
+      label,
+      labelLong:
+        months === 12
+          ? `${label} - ${shortMonthLabel(last)}`
+          : `${label} - ${shortMonthLabel(last)} (${months} mesi)`,
+      fraction,
+      months,
+    });
+  }
+  return periods;
+}
 
 /**
  * Calcola la proiezione completa per un profilo.
@@ -60,7 +106,9 @@ export function project(
   const warnings: string[] = [...snapshot.warnings];
   const models = estimateAllModels(snapshot);
   const anchor = settings.anchorOverride ?? snapshot.longRunAnchor;
-  const { baseYear, horizon, confidence } = settings;
+  const { startMonth, horizon, confidence } = settings;
+  const periods = buildPeriods(startMonth, horizon);
+  const baseYear = periods[0]!.year;
 
   // Correlazione media fra categorie: governa quanto le loro incertezze si
   // sommano invece di compensarsi.
@@ -116,10 +164,9 @@ export function project(
   }
   const initialRent = resolveInitialRent(profile, snapshot, warnings);
   const rentSchedule = buildRentSchedule({
+    periods,
     housing: profile.housing,
     initialMonthlyRent: initialRent,
-    baseYear,
-    horizon,
     marketIndex,
     foiRates,
     condoIndex,
@@ -165,8 +212,11 @@ export function project(
   let wealthLo = profile.initialSavings;
   let wealthHi = profile.initialSavings;
 
-  for (let h = 0; h <= horizon; h++) {
-    const year = baseYear + h;
+  for (let h = 0; h < periods.length; h++) {
+    const period = periods[h]!;
+    const year = period.year;
+    // Un periodo parziale vale in proporzione ai mesi che copre.
+    const f = period.fraction;
     const priceLevel = headlinePath[h]!.level;
     const categories: CategoryYearProjection[] = [];
     const events: ProjectionEvent[] = [...(rentSchedule[h]?.events ?? [])];
@@ -218,7 +268,7 @@ export function project(
       const model = modelFor(models, item.category) ?? headlineModel;
       const overridden = item.growthOverride !== null;
       const path = pathForItem(item);
-      const base = item.monthlyAmount * 12;
+      const base = item.monthlyAmount * 12 * f;
       const nominal = base * path[h]!.level;
       // Con un tasso scelto dall'utente l'incertezza del modello non si
       // applica: l'ipotesi e' sua, e disegnarle intorno una banda statistica
@@ -268,7 +318,8 @@ export function project(
       profile.income.monthlyNet *
       profile.income.monthsPerYear *
       incomeInflation *
-      Math.pow(1 + profile.income.realGrowth, h);
+      Math.pow(1 + profile.income.realGrowth, h) *
+      f;
 
     const savings = incomeNominal - totalNominal;
     const savingsLo = incomeNominal - totalHi;
@@ -286,6 +337,9 @@ export function project(
 
     years.push({
       year,
+      label: period.label,
+      labelLong: period.labelLong,
+      fraction: f,
       priceLevel,
       totalNominal,
       totalReal: totalNominal / priceLevel,
@@ -304,6 +358,8 @@ export function project(
   return {
     profileId: profile.id,
     profileName: profile.name,
+    startMonth: periods[0]!.startMonth,
+    endMonth: periods[periods.length - 1]!.endMonth,
     baseYear,
     years,
     models,
@@ -449,9 +505,13 @@ export function summarize(result: ProjectionResult): ProfileSummary {
   const last = result.years[result.years.length - 1]!;
   const n = result.years.length - 1;
   const cumulativeSpend = result.years.reduce((a, y) => a + y.totalNominal, 0);
+  // Il tasso di crescita va calcolato su importi annualizzati: confrontare un
+  // periodo pieno con uno parziale darebbe una crescita fittiziamente
+  // negativa.
+  const lastAnnualised = last.fraction > 0 ? last.totalNominal / last.fraction : 0;
   const cagr =
     n > 0 && first.totalNominal > 0
-      ? Math.pow(last.totalNominal / first.totalNominal, 1 / n) - 1
+      ? Math.pow(lastAnnualised / first.totalNominal, 1 / n) - 1
       : 0;
   const firstNegative = (pick: (y: YearProjection) => number): number | null =>
     result.years.find((y) => pick(y) < 0)?.year ?? null;
@@ -463,8 +523,8 @@ export function summarize(result: ProjectionResult): ProfileSummary {
     depletionYear: firstNegative((y) => y.cumulativeWealth),
     depletionYearLo: firstNegative((y) => y.cumulativeWealthLo),
     baseSpend: first.totalNominal,
-    finalSpend: last.totalNominal,
-    finalSpendReal: last.totalReal,
+    finalSpend: lastAnnualised,
+    finalSpendReal: last.priceLevel > 0 ? lastAnnualised / last.priceLevel : 0,
     cumulativeSpend,
     finalWealth: last.cumulativeWealth,
     finalWealthReal: last.cumulativeWealth / last.priceLevel,

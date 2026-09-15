@@ -20,8 +20,8 @@ browser e nessuna configurazione lascia il dispositivo.
 - **Coabitazione**: ripartizione del canone fra coinquilini in base alla
   metratura della camera e agli spazi comuni, con camera doppia e imposte a
   carico del solo intestatario.
-- **Previsione** a 3–30 anni per categoria, con bande di incertezza e valori
-  sia in euro correnti sia in euro di oggi.
+- **Previsione** da un anno e mezzo a 30 anni per categoria, con bande di
+  incertezza e valori sia in euro correnti sia in euro di oggi.
 - **Patrimonio**: quanto ti resta anno per anno, con la soglia dello zero e
   l'anno in cui i risparmi si esaurirebbero, anche nello scenario peggiore.
 - **Spiegazione** di ogni categoria: quanta parte dell'aumento viene
@@ -123,6 +123,20 @@ Due dettagli che è facile sbagliare e che qui sono modellati:
 Le spese condominiali si dividono invece in parti uguali: cucina, pulizie e
 ascensore non dipendono da quanto è grande la tua camera.
 
+### I periodi partono da oggi, non da gennaio
+
+Le proiezioni scorrono in finestre di dodici mesi **a partire dal mese
+corrente**: aprendo l'applicazione a settembre il primo periodo è «set 2026 –
+ago 2027», non l'anno solare 2026. Ancorare i conti all'anno solare
+imputerebbe una spesa annua intera a un anno di cui restano tre mesi, e
+falserebbe soprattutto il patrimonio, che parte da oggi.
+
+L'orizzonte può essere frazionario: a un anno e mezzo l'ultimo periodo copre
+sei mesi e costa in proporzione, invece di arrotondare a due anni interi. Gli
+importi vengono annualizzati prima di calcolare i tassi di crescita, altrimenti
+confrontare un periodo pieno con uno dimezzato darebbe una crescita
+fittiziamente negativa.
+
 ### Le incertezze non si sommano
 
 Le bande delle singole categorie **non** si sommano fra loro. Sommarle
@@ -212,7 +226,7 @@ npm run dev            # http://localhost:5173/carovita/
 Altri comandi:
 
 ```bash
-npm test          # 79 test: invarianti di dominio + integrazione sui dati veri
+npm test          # 88 test: invarianti di dominio + integrazione sui dati veri
 npm run typecheck
 npm run backtest  # rigenera docs/BACKTEST.md
 npm run build

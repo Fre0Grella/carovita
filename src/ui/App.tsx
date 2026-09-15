@@ -8,7 +8,11 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
-import { forecastRatesByCategory, project } from '../core/project.js';
+import {
+  currentMonth,
+  forecastRatesByCategory,
+  project,
+} from '../core/project.js';
 import type {
   CategoryId,
   DataSnapshot,
@@ -27,6 +31,7 @@ import {
   makeDefaultProfile,
   saveState,
 } from './defaults.js';
+import { shortMonthLabel } from '../core/series.js';
 import { eur, isoDate, pct } from './format.js';
 
 type Tab = 'config' | 'previsione' | 'confronto' | 'dati';
@@ -50,7 +55,9 @@ export function App(): JSX.Element {
   const [activeId, setActiveId] = useState<string>(
     () => (stored?.profiles ?? [makeDefaultProfile(0)])[0]!.id,
   );
-  const [horizon, setHorizon] = useState(stored?.horizon ?? 15);
+  const [horizon, setHorizon] = useState(
+    Math.min(30, Math.max(1.5, stored?.horizon ?? 15)),
+  );
   const [anchorOverride, setAnchorOverride] = useState<number | null>(
     stored?.anchorOverride ?? null,
   );
@@ -70,19 +77,21 @@ export function App(): JSX.Element {
   const active =
     profiles.find((p) => p.id === activeId) ?? profiles[0] ?? null;
 
-  const baseYear = useMemo(() => new Date().getFullYear(), []);
+  // I conti partono dal mese corrente, non da gennaio: a settembre imputare
+  // una spesa annua intera all'anno in corso sarebbe sbagliato di nove mesi.
+  const startMonth = useMemo(() => currentMonth(), []);
 
   const results: ProjectionResult[] = useMemo(() => {
     if (!snapshot) return [];
     return profiles.map((p) =>
       project(p, snapshot, {
-        baseYear,
+        startMonth,
         horizon,
         anchorOverride,
         confidence,
       }),
     );
-  }, [snapshot, profiles, baseYear, horizon, anchorOverride, confidence]);
+  }, [snapshot, profiles, startMonth, horizon, anchorOverride, confidence]);
 
   const activeResult = results.find((r) => r.profileId === activeId) ?? results[0];
 
@@ -170,16 +179,25 @@ export function App(): JSX.Element {
           </div>
 
           <div className="field">
-            <label htmlFor="s-horizon">Orizzonte: {horizon} anni</label>
+            <label htmlFor="s-horizon">
+              Orizzonte:{' '}
+              {horizon === 1.5
+                ? 'un anno e mezzo'
+                : `${horizon.toLocaleString('it-IT')} anni`}
+            </label>
             <input
               id="s-horizon"
               type="range"
-              min={3}
+              min={1.5}
               max={30}
-              step={1}
+              step={0.5}
               value={horizon}
               onChange={(e) => setHorizon(Number(e.target.value))}
             />
+            <span className="hint">
+              Si parte da {activeResult ? shortMonthLabel(activeResult.startMonth) : 'oggi'}
+              {activeResult ? ` e si arriva a ${shortMonthLabel(activeResult.endMonth)}` : ''}.
+            </span>
           </div>
 
           <div className="field">

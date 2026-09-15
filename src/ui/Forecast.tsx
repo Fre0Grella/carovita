@@ -24,6 +24,7 @@ import {
 } from 'recharts';
 
 import { summarize } from '../core/project.js';
+import { shortMonthLabel } from '../core/series.js';
 import type { ProjectionResult } from '../core/types.js';
 import { eur, eurSigned, pct, pctSigned } from './format.js';
 
@@ -60,7 +61,7 @@ export function Forecast({ result, real }: Props): JSX.Element {
         const lo = y.cumulativeWealthLo / k;
         const hi = y.cumulativeWealthHi / k;
         return {
-          anno: y.year,
+          anno: y.label,
           patrimonio: y.cumulativeWealth / k,
           bandaBase: lo,
           bandaAlt: hi - lo,
@@ -72,7 +73,7 @@ export function Forecast({ result, real }: Props): JSX.Element {
   const chartData = useMemo(
     () =>
       result.years.map((y) => ({
-        anno: y.year,
+        anno: y.label,
         spesa: real ? y.totalReal : y.totalNominal,
         // L'area della banda si disegna come [base, altezza]: Recharts
         // impila il secondo valore sul primo.
@@ -210,8 +211,9 @@ export function Forecast({ result, real }: Props): JSX.Element {
 
       <div className="card">
         <h2>
-          Spesa annua {real ? 'in euro di oggi' : 'in euro correnti'},{' '}
-          {first.year}–{last.year}
+          Spesa {real ? 'in euro di oggi' : 'in euro correnti'}, da{' '}
+          {shortMonthLabel(result.startMonth)} a{' '}
+          {shortMonthLabel(result.endMonth)}
         </h2>
         <p className="muted small" style={{ marginTop: -4 }}>
           Da <strong>{eur(amount(first))}</strong> a{' '}
@@ -314,8 +316,8 @@ export function Forecast({ result, real }: Props): JSX.Element {
       <div className="card">
         <h2>Da dove viene l’aumento</h2>
         <p className="muted small" style={{ marginTop: -4 }}>
-          Spesa per categoria nell’ultimo anno previsto ({last.year}), a
-          confronto con oggi. Apri una categoria per vedere la scomposizione.
+          Spesa per categoria nell’ultimo periodo previsto ({last.label}), a
+          confronto con i prossimi dodici mesi. Apri una categoria per vedere la scomposizione.
         </p>
 
         <div className="table-wrap">

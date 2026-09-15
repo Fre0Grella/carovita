@@ -35,6 +35,7 @@
 import type {
   ContractType,
   HousingConfig,
+  Period,
   ProjectionEvent,
 } from './types.js';
 
@@ -202,6 +203,8 @@ export interface RentYear {
 }
 
 export interface RentScheduleInput {
+  /** Periodi di proiezione, dal mese corrente in avanti. */
+  periods: Period[];
   housing: HousingConfig;
   /**
    * Canone mensile iniziale dell'**intera** abitazione, in EUR. La
@@ -210,8 +213,6 @@ export interface RentScheduleInput {
    * dividerle prima darebbe un risultato diverso.
    */
   initialMonthlyRent: number;
-  baseYear: number;
-  horizon: number;
   /**
    * Indice cumulato del canone di mercato, lungo `horizon + 1`, con 1
    * all'anno base. Deriva dalla previsione della categoria `rent`.
@@ -240,14 +241,14 @@ export interface RentScheduleInput {
  */
 export function buildRentSchedule(input: RentScheduleInput): RentYear[] {
   const {
+    periods,
     housing,
     initialMonthlyRent,
-    baseYear,
-    horizon,
     marketIndex,
     foiRates,
     condoIndex,
   } = input;
+  const horizon = periods.length - 1;
   const out: RentYear[] = [];
 
   // Quota a tuo carico e numero di conviventi: le spese condominiali si
@@ -257,9 +258,11 @@ export function buildRentSchedule(input: RentScheduleInput): RentYear[] {
 
   if (housing.contractType === 'proprieta') {
     for (let h = 0; h <= horizon; h++) {
-      const condo = (housing.condoFees * 12 * (condoIndex[h] ?? 1)) / occupants;
+      const f = periods[h]!.fraction;
+      const condo =
+        (housing.condoFees * 12 * (condoIndex[h] ?? 1) * f) / occupants;
       out.push({
-        year: baseYear + h,
+        year: periods[h]!.year,
         monthlyRent: 0,
         annualRent: 0,
         apartmentMonthlyRent: 0,
@@ -285,7 +288,11 @@ export function buildRentSchedule(input: RentScheduleInput): RentYear[] {
   let yearsInContract = 0;
 
   for (let h = 0; h <= horizon; h++) {
-    const year = baseYear + h;
+    const period = periods[h]!;
+    const year = period.year;
+    // Un periodo parziale costa in proporzione ai mesi che copre: senza
+    // questo, un orizzonte di diciotto mesi imputerebbe due anni interi.
+    const f = period.fraction;
     const events: ProjectionEvent[] = [];
 
     if (h > 0) {
@@ -353,14 +360,16 @@ export function buildRentSchedule(input: RentScheduleInput): RentYear[] {
     // sia la base imponibile del contratto sia la quota a tuo carico.
     const apartmentAnnualRent = monthlyRent * 12;
     const myMonthlyRent = monthlyRent * rentShare;
-    const annualRent = myMonthlyRent * 12;
-    const { registrationTax, stampDuty } = registrationCosts({
+    const annualRent = myMonthlyRent * 12 * f;
+    const gross = registrationCosts({
       housing,
       annualRent: apartmentAnnualRent,
       isFirstYear: h === 0,
       isRenewalYear: h > 0 && yearsInContract === 0,
       rentShare,
     });
+    const registrationTax = gross.registrationTax * f;
+    const stampDuty = gross.stampDuty;
 
     if (registrationTax > 0) {
       events.push({
@@ -374,7 +383,8 @@ export function buildRentSchedule(input: RentScheduleInput): RentYear[] {
       });
     }
 
-    const condo = (housing.condoFees * 12 * (condoIndex[h] ?? 1)) / occupants;
+    const condo =
+      (housing.condoFees * 12 * (condoIndex[h] ?? 1) * f) / occupants;
     const marketRent = (initialMonthlyRent * marketIndex[h]!) / marketIndex[0]!;
 
     out.push({

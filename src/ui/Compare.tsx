@@ -19,6 +19,7 @@ import {
 } from 'recharts';
 
 import { summarize } from '../core/project.js';
+import { shortMonthLabel } from '../core/series.js';
 import type { ProjectionResult } from '../core/types.js';
 import { eur, eurSigned, pct, pctSigned } from './format.js';
 
@@ -32,9 +33,9 @@ export function Compare({ results, colors, real }: Props): JSX.Element {
   const summaries = useMemo(() => results.map(summarize), [results]);
 
   const chartData = useMemo(() => {
-    const years = results[0]?.years.map((y) => y.year) ?? [];
+    const years = results[0]?.years.map((y) => y.label) ?? [];
     return years.map((year, i) => {
-      const row: Record<string, number> = { anno: year };
+      const row: Record<string, number | string> = { anno: year };
       results.forEach((r, ri) => {
         const y = r.years[i];
         if (y) row[`p${ri}`] = real ? y.totalReal : y.totalNominal;
@@ -44,9 +45,9 @@ export function Compare({ results, colors, real }: Props): JSX.Element {
   }, [results, real]);
 
   const wealthData = useMemo(() => {
-    const years = results[0]?.years.map((y) => y.year) ?? [];
+    const years = results[0]?.years.map((y) => y.label) ?? [];
     return years.map((year, i) => {
-      const row: Record<string, number> = { anno: year };
+      const row: Record<string, number | string> = { anno: year };
       results.forEach((r, ri) => {
         const y = r.years[i];
         if (y) {
@@ -83,7 +84,8 @@ export function Compare({ results, colors, real }: Props): JSX.Element {
       <div className="card">
         <h2>Quale profilo conviene</h2>
         <p className="muted small" style={{ marginTop: -4 }}>
-          Su {results[0]!.years.length - 1} anni, in{' '}
+          Da {shortMonthLabel(results[0]!.startMonth)} a{' '}
+          {shortMonthLabel(results[0]!.endMonth)}, in{' '}
           {real ? 'euro di oggi' : 'euro correnti'}. Il riferimento è{' '}
           <strong>{ref.profileName}</strong>.
         </p>
