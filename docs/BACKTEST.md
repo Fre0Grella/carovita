@@ -68,6 +68,12 @@ Le colonne di copertura indicano la quota di casi in cui il valore reale è cadu
 
 Le due colonne misurano cose diverse, ed è la seconda quella che conta per chi guarda i grafici. **Copertura tasso** valida la banda sul tasso di inflazione annuo. **Copertura livello** valida la banda sul livello cumulato della spesa, che è la fascia effettivamente disegnata nell’applicazione: sono grandezze con varianze diverse, e una banda ben calibrata sul tasso può essere mal calibrata sul livello. **Errore livello** è lo scarto percentuale medio fra la spesa cumulata prevista e quella realizzata.
 
+### Limite noto: le bande a lungo termine sono ottimistiche
+
+La copertura sul livello è vicina al valore dichiarato nei primi due-tre anni, poi scende. Tradotto: **la banda a dieci anni è troppo stretta**, e l’incertezza reale su quell’orizzonte è maggiore di quella disegnata.
+
+La ragione è strutturale e non si elimina con un modello di questa famiglia: in trent’anni l’Italia è passata per il cambio all’euro, la crisi del 2008 e lo shock energetico del 2022. Sono rotture di regime, non estrazioni da una distribuzione stabile, e nessuna stima basata sulla volatilità passata le anticipa. Il numero è riportato qui invece che nascosto proprio perché chi legge una proiezione a dieci anni sappia quanto fidarsi della fascia grigia.
+
 ## Parametri stimati sullo snapshot corrente
 
 `phi` = persistenza dello scostamento; `spread` = differenziale strutturale annuo rispetto all’indice generale; `ultimo` = inflazione tendenziale più recente.
