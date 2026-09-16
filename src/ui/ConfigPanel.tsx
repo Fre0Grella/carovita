@@ -24,10 +24,9 @@ import {
   lastInstallment,
   monthlyEquivalent,
 } from '../core/schedule.js';
-import { shortMonthLabel } from '../core/series.js';
 import { CityPicker } from './CityPicker.js';
 import { CATEGORY_LABELS, SELECTABLE_CATEGORIES } from './defaults.js';
-import { eur, pct } from './format.js';
+import { aMese, eur, pct } from './format.js';
 
 interface Props {
   profile: Profile;
@@ -935,7 +934,7 @@ function ScheduleCell({
               onChange={(firstMonth) => onChange({ ...s, firstMonth })}
             />
           </div>
-          <div className="hint">ultima rata a {shortMonthLabel(lastInstallment(s))}</div>
+          <div className="hint">ultima rata {aMese(lastInstallment(s))}</div>
         </div>
       )}
 

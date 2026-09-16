@@ -120,7 +120,7 @@ export function Compare({ results, colors, selected, onSelect }: Props): JSX.Ele
   )[0]!;
   const span = periodSpan(first, selected);
   const names = summaries.map((s) => s.profileName);
-  // Avanzo e disavanzo in colonne separate, ciascuna solo se almeno un
+  // Risparmi e perdite in colonne separate, ciascuna solo se almeno un
   // profilo ne ha uno nell'anno scelto.
   const balances = results.map((r) => r.years[selected]?.savingsNominal ?? 0);
   const anySurplus = balances.some((b) => surplus(b) !== null);
@@ -221,9 +221,9 @@ export function Compare({ results, colors, selected, onSelect }: Props): JSX.Ele
                 <th>Profilo</th>
                 <th>Reddito netto</th>
                 <th>Spese</th>
-                {anySurplus && <th>Avanzo</th>}
+                {anySurplus && <th>Risparmi</th>}
                 {anyDeficit && (
-                  <th style={{ color: 'var(--critical)' }}>Disavanzo</th>
+                  <th style={{ color: 'var(--critical)' }}>Perdite</th>
                 )}
                 <th>Patrimonio a fine periodo</th>
                 <th>Differenza di patrimonio</th>

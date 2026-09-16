@@ -102,7 +102,7 @@ export function describeSchedule(schedule: ExpenseSchedule): string {
     case 'recurring': {
       const step = normalisedStep(schedule.everyMonths);
       if (step === 1) return 'ogni mese';
-      if (step === 12) return `ogni anno a ${MONTH_NAMES[schedule.month - 1]}`;
+      if (step === 12) return `ogni anno ${preposition(MONTH_NAMES[schedule.month - 1]!)}`;
       const months = recurringMonths(schedule)
         .map((m) => MONTH_NAMES[m - 1]!.slice(0, 3))
         .join(', ');
@@ -111,9 +111,14 @@ export function describeSchedule(schedule: ExpenseSchedule): string {
     case 'installments':
       return (
         `${schedule.count} rate da ${shortMonthLabel(schedule.firstMonth)} ` +
-        `a ${shortMonthLabel(lastInstallment(schedule))}`
+        preposition(shortMonthLabel(lastInstallment(schedule)))
       );
     case 'once':
-      return `una volta, a ${shortMonthLabel(schedule.month)}`;
+      return `una volta, ${preposition(shortMonthLabel(schedule.month))}`;
   }
+}
+
+/** `agosto` -> `ad agosto`, `marzo` -> `a marzo`: la «d» eufonica. */
+function preposition(month: string): string {
+  return (/^[aeiou]/.test(month) ? 'ad ' : 'a ') + month;
 }

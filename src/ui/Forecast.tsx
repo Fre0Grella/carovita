@@ -45,10 +45,12 @@ import {
   timeGridProps,
 } from './charts.js';
 import {
+  aMese,
   deficit,
   eur,
   eurPrecise,
   eurSigned,
+  fraCirca,
   pct,
   pctSigned,
   surplus,
@@ -198,7 +200,7 @@ function WealthCard({ result, tl, selected, onSelect }: ChartProps): JSX.Element
               stroke="var(--critical)"
               strokeWidth={1.5}
               label={{
-                value: 'risparmi esauriti',
+                value: 'patrimonio a zero',
                 position: 'insideBottomLeft',
                 fontSize: 11,
                 fill: 'var(--critical)',
@@ -244,7 +246,7 @@ function WealthCard({ result, tl, selected, onSelect }: ChartProps): JSX.Element
         La distanza fra le due linee è quanto si mangia l’inflazione
         {sum.finalWealth > 0 ? (
           <>
-            : a {shortMonthLabel(result.endMonth)} i tuoi {eur(sum.finalWealth)}{' '}
+            : {aMese(result.endMonth)} i tuoi {eur(sum.finalWealth)}{' '}
             compreranno quanto {eur(sum.finalWealthReal)} oggi ({pctSigned(erosion)})
           </>
         ) : (
@@ -299,15 +301,12 @@ function WealthTooltip({
  */
 function Verdict({ result }: { result: ProjectionResult }): JSX.Element {
   const s = summarize(result);
-  const end = shortMonthLabel(result.endMonth);
+  const end = aMese(result.endMonth);
   const months = result.months;
   const lastWealth = months[months.length - 1]?.wealth ?? 0;
   const inRed = months.filter((m) => m.wealth < 0).length;
-  const fra = (t: string): string => {
-    const n = monthIndex(t) - monthIndex(result.startMonth);
-    if (n < 24) return `fra ${n} ${n === 1 ? 'mese' : 'mesi'}`;
-    return `fra circa ${Math.round(n / 12)} anni`;
-  };
+  const fra = (t: string): string =>
+    fraCirca(monthIndex(t) - monthIndex(result.startMonth));
   const inToday = (
     <>
       {' '}
@@ -319,10 +318,10 @@ function Verdict({ result }: { result: ProjectionResult }): JSX.Element {
     return (
       <div className="notice" style={{ borderLeftColor: 'var(--critical)' }}>
         <strong>
-          I risparmi finiscono a {shortMonthLabel(s.depletionMonth)}
+          Il patrimonio va sotto zero {aMese(s.depletionMonth)}
         </strong>
         , {fra(s.depletionMonth)}. Da lì in poi la spesa supera quello che hai
-        messo da parte: a {end} saresti a {eur(s.finalWealth)}.
+        messo da parte: {end} saresti a {eurSigned(s.finalWealth)}.
       </div>
     );
   }
@@ -331,11 +330,11 @@ function Verdict({ result }: { result: ProjectionResult }): JSX.Element {
     return (
       <div className="notice">
         <strong>
-          A {shortMonthLabel(s.depletionMonth)} il conto va sotto zero
+          Il patrimonio va sotto zero {aMese(s.depletionMonth)}
         </strong>{' '}
         e ci resta per {inRed} {inRed === 1 ? 'mese' : 'mesi'} in tutto, prima
         di recuperare: è il momento in cui una spesa concentrata arriva prima
-        delle entrate. A {end} avresti {eur(s.finalWealth)}
+        delle entrate. {capitalize(end)} avresti {eur(s.finalWealth)}
         {inToday}.
       </div>
     );
@@ -345,8 +344,8 @@ function Verdict({ result }: { result: ProjectionResult }): JSX.Element {
     return (
       <div className="notice">
         <strong>Stai spendendo più di quanto incassi</strong> —{' '}
-        {eur(-s.savingsFirstYear)} nei prossimi dodici mesi. Il patrimonio regge
-        fino a {end}, chiudendo a {eur(s.finalWealth)}
+        {eur(-s.savingsFirstYear)} di perdite nei prossimi dodici mesi. Il
+        patrimonio regge fino alla fine, chiudendo {end} a {eur(s.finalWealth)}
         {inToday}, ma la direzione è in discesa.
       </div>
     );
@@ -355,16 +354,16 @@ function Verdict({ result }: { result: ProjectionResult }): JSX.Element {
   return (
     <div className="notice info">
       <strong>
-        A {end} avresti {eur(s.finalWealth)}
+        {capitalize(end)} avresti {eur(s.finalWealth)}
       </strong>
       {inToday}, partendo da {eur(result.initialSavings)} e mettendo da parte{' '}
       {eur(s.savingsFirstYear)} nei prossimi dodici mesi.
       {s.depletionMonthLo !== null && (
         <>
           {' '}
-          Se però la spesa andasse come nello scenario peggiore, il conto
-          andrebbe sotto zero a{' '}
-          <strong>{shortMonthLabel(s.depletionMonthLo)}</strong>.
+          Se però la spesa andasse come nello scenario peggiore, il
+          patrimonio andrebbe sotto zero{' '}
+          <strong>{aMese(s.depletionMonthLo)}</strong>.
         </>
       )}
     </div>
@@ -403,8 +402,8 @@ function YearExplorer({
     return pctSigned(b / a - 1);
   };
 
-  // Avanzo e disavanzo sono due righe distinte, ciascuna con importi
-  // positivi: un «avanzo di −50 €» si legge male. Una riga compare solo se
+  // Risparmi e perdite sono due righe distinte, ciascuna con importi
+  // positivi: «risparmi di −50 €» si legge male. Una riga compare solo se
   // almeno uno dei due anni la riguarda, e nell'altro mostra un trattino.
   const rows: {
     label: string;
@@ -417,15 +416,15 @@ function YearExplorer({
     { label: 'Reddito netto', first: y0.incomeNominal, now: y.incomeNominal, stock: false },
     { label: 'Spese', first: y0.totalNominal, now: y.totalNominal, stock: false },
     {
-      label: 'Avanzo',
+      label: 'Risparmi',
       hint: 'quanto metti da parte',
       first: surplus(y0.savingsNominal),
       now: surplus(y.savingsNominal),
       stock: false,
     },
     {
-      label: 'Disavanzo',
-      hint: 'quanto ti manca: lo prendi dai risparmi',
+      label: 'Perdite',
+      hint: 'quanto ti manca: attingi al patrimonio',
       loss: true,
       first: deficit(y0.savingsNominal),
       now: deficit(y.savingsNominal),
@@ -918,8 +917,8 @@ function FlowTooltip({
         { name: `Uscite${suffix}`, value: row.spesa, color: 'var(--series-1)' },
         { name: `Entrate${suffix}`, value: row.reddito, color: 'var(--series-3)' },
         deficit(balance) === null
-          ? { name: 'Avanzo', value: surplus(balance) ?? 0 }
-          : { name: 'Disavanzo', value: deficit(balance)!, color: 'var(--critical)' },
+          ? { name: 'Risparmi', value: surplus(balance) ?? 0 }
+          : { name: 'Perdite', value: deficit(balance)!, color: 'var(--critical)' },
       ]}
       notes={row.charges}
     />
@@ -966,4 +965,9 @@ function Events({ result }: { result: ProjectionResult }): JSX.Element {
       </div>
     </div>
   );
+}
+
+/** `ad ago 2041` -> `Ad ago 2041`, per l'inizio di una frase. */
+function capitalize(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }

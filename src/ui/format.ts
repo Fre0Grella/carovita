@@ -1,5 +1,7 @@
 /** Formattatori condivisi, tutti in convenzione italiana. */
 
+import { shortMonthLabel } from '../core/series.js';
+
 const eur0 = new Intl.NumberFormat('it-IT', {
   style: 'currency',
   currency: 'EUR',
@@ -67,11 +69,11 @@ export function isoDate(iso: string): string {
 }
 
 /**
- * Avanzo e disavanzo come importi distinti e sempre positivi.
+ * Risparmi e perdite come importi distinti e sempre positivi.
  *
- * Un saldo negativo non si mostra come «avanzo di −50 €»: diventa un
- * disavanzo di 50 €, e l'avanzo sparisce. Sotto il mezzo euro il saldo conta
- * come pareggio, che si mostra come avanzo nullo.
+ * Un saldo negativo non si mostra come «risparmi di −50 €»: diventa una
+ * perdita di 50 €, e la voce dei risparmi sparisce. Sotto il mezzo euro il
+ * saldo conta come pareggio, che si mostra come risparmio nullo.
  */
 export function surplus(balance: number): number | null {
   return balance >= -0.5 ? Math.max(0, balance) : null;
@@ -79,4 +81,28 @@ export function surplus(balance: number): number | null {
 
 export function deficit(balance: number): number | null {
   return balance < -0.5 ? -balance : null;
+}
+
+/** `2041-08` -> `ad ago 2041`: davanti a vocale la preposizione prende la «d». */
+export function aMese(t: string): string {
+  const label = shortMonthLabel(t);
+  return (/^[aeiou]/.test(label) ? 'ad ' : 'a ') + label;
+}
+
+/** Durata in mesi -> `fra 15 anni`, `fra un anno e mezzo`, `fra 8 mesi`. */
+export function fraTempo(months: number): string {
+  if (months <= 0) return 'già questo mese';
+  if (months < 12) return months === 1 ? 'fra un mese' : `fra ${months} mesi`;
+  const y = Math.floor(months / 12);
+  const r = months % 12;
+  const anni = y === 1 ? 'un anno' : `${y} anni`;
+  if (r === 0) return `fra ${anni}`;
+  if (r === 6) return `fra ${anni} e mezzo`;
+  return `fra ${anni} e ${r} ${r === 1 ? 'mese' : 'mesi'}`;
+}
+
+/** Come `fraTempo`, ma arrotondato ad anni oltre i due anni: è una stima. */
+export function fraCirca(months: number): string {
+  if (months < 24) return fraTempo(months);
+  return `fra circa ${Math.round(months / 12)} anni`;
 }

@@ -32,8 +32,18 @@ import {
   makeDefaultProfile,
   saveState,
 } from './defaults.js';
-import { shortMonthLabel } from '../core/series.js';
-import { deficit, eur, isoDate, pct } from './format.js';
+import { monthIndex, shortMonthLabel } from '../core/series.js';
+import {
+  aMese,
+  deficit,
+  eur,
+  eurSigned,
+  fraCirca,
+  fraTempo,
+  isoDate,
+  pct,
+  pctSigned,
+} from './format.js';
 
 type Tab = 'config' | 'previsione' | 'confronto' | 'dati';
 
@@ -203,7 +213,7 @@ export function App(): JSX.Element {
             />
             <span className="hint">
               Si parte da {activeResult ? shortMonthLabel(activeResult.startMonth) : 'oggi'}
-              {activeResult ? ` e si arriva a ${shortMonthLabel(activeResult.endMonth)}` : ''}.
+              {activeResult ? ` e si arriva ${aMese(activeResult.endMonth)}` : ''}.
             </span>
           </div>
 
@@ -350,40 +360,57 @@ export function App(): JSX.Element {
 
 // ---------------------------------------------------------------------------
 
+/**
+ * Barra di riepilogo: quattro numeri che si leggono senza grafici.
+ *
+ * Spese e risparmi sono al mese, perché è così che si ragiona su uno
+ * stipendio; il totale dei dodici mesi sta sotto. «Oggi» è la media dei
+ * prossimi dodici mesi, «fra N anni» quella degli ultimi dodici
+ * dell'orizzonte. Il patrimonio, se va sotto zero, mostra quando ci va e
+ * quanto manca a fine periodo, che è ciò che serve sapere in quel caso.
+ */
 function Summary({ result }: { result: ProjectionResult }): JSX.Element {
   const s = summarize(result);
-  const end = shortMonthLabel(result.endMonth);
-
-  // Gli importi futuri sono in euro correnti, cioe' quelli che vedrai sul
-  // conto; il loro valore in euro di oggi sta sotto, invece che dietro un
-  // interruttore che cambia tutti i numeri.
+  const future = fraTempo(result.months.length);
+  const growth = s.baseSpend > 0 ? s.finalSpend / s.baseSpend - 1 : 0;
   const loss = deficit(s.savingsFirstYear);
-  const cells: { label: string; value: string; hint?: string; loss?: boolean }[] = [
-    { label: 'Spesa nei prossimi 12 mesi', value: eur(s.baseSpend) },
+
+  const cells: StatCell[] = [
     {
-      label: `Spesa annua a ${end}`,
-      value: eur(s.finalSpend),
-      hint: `pari a ${eur(s.finalSpendReal)} di oggi`,
+      label: 'Spesa oggi',
+      value: eur(s.baseSpend / 12),
+      unit: 'al mese',
+      notes: [{ text: `${eur(s.baseSpend)} nei prossimi 12 mesi` }],
     },
-    // Un saldo negativo non e' un «avanzo di −50 €»: diventa un disavanzo,
-    // mostrato in positivo e in rosso, e la voce avanzo sparisce.
+    {
+      label: `Spesa ${future}`,
+      value: eur(s.finalSpend / 12),
+      unit: 'al mese',
+      notes: [
+        { text: `${pctSigned(growth)} rispetto a oggi` },
+        { text: `in euro di oggi: ${eur(s.finalSpendReal / 12)}` },
+      ],
+    },
+    // Un saldo negativo non e' un «risparmio di −50 €»: diventa una perdita,
+    // mostrata in positivo e in rosso, e la voce dei risparmi sparisce.
     loss === null
       ? {
-          label: 'Avanzo nei prossimi 12 mesi',
-          value: eur(Math.max(0, s.savingsFirstYear)),
-          hint: 'quanto metti da parte',
+          label: 'Risparmi oggi',
+          value: eur(Math.max(0, s.savingsFirstYear) / 12),
+          unit: 'al mese',
+          notes: [{ text: `${eur(Math.max(0, s.savingsFirstYear))} nei prossimi 12 mesi` }],
         }
       : {
-          label: 'Disavanzo nei prossimi 12 mesi',
-          value: eur(loss),
-          hint: 'spendi più di quanto incassi: lo prendi dai risparmi',
+          label: 'Perdite oggi',
+          value: eur(loss / 12),
+          unit: 'al mese',
           loss: true,
+          notes: [
+            { text: `${eur(loss)} nei prossimi 12 mesi` },
+            { text: 'spendi più di quanto incassi e attingi al patrimonio' },
+          ],
         },
-    {
-      label: `Patrimonio a ${end}`,
-      value: eur(s.finalWealth),
-      hint: `pari a ${eur(s.finalWealthReal)} di oggi`,
-    },
+    wealthCell(result, s, future),
   ];
 
   return (
@@ -393,7 +420,10 @@ function Summary({ result }: { result: ProjectionResult }): JSX.Element {
           <div key={c.label}>
             <div
               className="small"
-              style={{ color: c.loss ? 'var(--critical)' : 'var(--text-muted)' }}
+              style={{
+                color: c.loss ? 'var(--critical)' : 'var(--text-muted)',
+                fontWeight: c.loss ? 600 : undefined,
+              }}
             >
               {c.label}
             </div>
@@ -406,11 +436,77 @@ function Summary({ result }: { result: ProjectionResult }): JSX.Element {
               }}
             >
               {c.value}
+              {c.unit && (
+                <span className="small muted" style={{ fontWeight: 400 }}>
+                  {' '}
+                  {c.unit}
+                </span>
+              )}
             </div>
-            {c.hint && <div className="hint">{c.hint}</div>}
+            {c.notes.map((n, i) => (
+              <div
+                key={i}
+                className="small"
+                style={{
+                  color: n.strong ? 'var(--text-primary)' : 'var(--text-muted)',
+                  fontWeight: n.strong ? 600 : undefined,
+                }}
+              >
+                {n.text}
+              </div>
+            ))}
           </div>
         ))}
       </div>
     </div>
   );
+}
+
+interface StatCell {
+  label: string;
+  value: string;
+  unit?: string;
+  loss?: boolean;
+  notes: { text: string; strong?: boolean }[];
+}
+
+function wealthCell(
+  result: ProjectionResult,
+  s: ReturnType<typeof summarize>,
+  future: string,
+): StatCell {
+  const end = shortMonthLabel(result.endMonth);
+
+  // Il patrimonio finisce sotto zero: contano la data in cui ci arriva e
+  // quanto manca alla fine, non un saldo negativo messo lì senza contesto.
+  if (s.depletionMonth !== null && s.finalWealth < 0) {
+    const after = monthIndex(s.depletionMonth) - monthIndex(result.startMonth);
+    return {
+      label: 'Patrimonio sotto zero',
+      value: `da ${shortMonthLabel(s.depletionMonth)}`,
+      loss: true,
+      notes: [
+        { text: `${fraCirca(after)}, data indicativa` },
+        { text: `a fine periodo (${end}): ${eurSigned(s.finalWealth)}`, strong: true },
+      ],
+    };
+  }
+
+  const notes: StatCell['notes'] = [
+    { text: `pari a ${eur(s.finalWealthReal)} di oggi` },
+  ];
+  // Sotto zero per qualche mese, poi di nuovo sopra: va detto, perché in
+  // quei mesi il conto e' davvero in rosso.
+  if (s.depletionMonth !== null) {
+    const below = result.months.filter((m) => m.wealth < 0).length;
+    notes.push({
+      text: `sotto zero da ${shortMonthLabel(s.depletionMonth)}, ${below} ${below === 1 ? 'mese' : 'mesi'} in rosso in tutto, poi recupera`,
+      strong: true,
+    });
+  }
+  return {
+    label: `Patrimonio ${future}`,
+    value: eur(s.finalWealth),
+    notes,
+  };
 }

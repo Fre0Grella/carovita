@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { deficit, surplus } from '../src/ui/format.js';
+import { aMese, deficit, fraTempo, surplus } from '../src/ui/format.js';
 import { buildTimeline, tickLabel } from '../src/ui/timeline.js';
 
 describe('asse del tempo', () => {
@@ -39,20 +39,35 @@ describe('asse del tempo', () => {
   });
 });
 
-describe('avanzo e disavanzo', () => {
-  it('un saldo positivo e’ un avanzo, e non c’e’ disavanzo', () => {
+describe('risparmi e perdite', () => {
+  it('un saldo positivo sono risparmi, e non ci sono perdite', () => {
     expect(surplus(600)).toBe(600);
     expect(deficit(600)).toBeNull();
   });
 
-  it('un saldo negativo e’ un disavanzo positivo, e l’avanzo sparisce', () => {
+  it('un saldo negativo e’ una perdita positiva, e i risparmi spariscono', () => {
     expect(deficit(-50)).toBe(50);
     expect(surplus(-50)).toBeNull();
   });
 
-  it('il pareggio si mostra come avanzo nullo, non come disavanzo', () => {
+  it('il pareggio si mostra come risparmio nullo, non come perdita', () => {
     expect(surplus(0)).toBe(0);
     expect(surplus(-0.3)).toBe(0);
     expect(deficit(-0.3)).toBeNull();
+  });
+});
+
+describe('date e durate in italiano', () => {
+  it('usa «ad» davanti ai mesi che iniziano per vocale', () => {
+    expect(aMese('2041-08')).toBe('ad ago 2041');
+    expect(aMese('2031-10')).toBe('ad ott 2031');
+    expect(aMese('2028-03')).toBe('a mar 2028');
+  });
+
+  it('descrive l’orizzonte come lo direbbe una persona', () => {
+    expect(fraTempo(18)).toBe('fra un anno e mezzo');
+    expect(fraTempo(180)).toBe('fra 15 anni');
+    expect(fraTempo(42)).toBe('fra 3 anni e mezzo');
+    expect(fraTempo(12)).toBe('fra un anno');
   });
 });

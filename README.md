@@ -29,7 +29,8 @@ browser e nessuna configurazione lascia il dispositivo.
 - **Mese per mese**: entrate e uscite con una barra per mese e una linea per
   ogni mese fino a tre anni, una linea ogni sei mesi sugli orizzonti lunghi.
 - **Anno per anno**: uno slider per mettere un anno futuro accanto al primo —
-  reddito, spese, avanzo, patrimonio e il prezzo di ogni singola voce.
+  reddito, spese, risparmi o perdite, patrimonio e il prezzo di ogni singola
+  voce.
 - **Patrimonio**: quanto ti resta mese per mese, con la soglia dello zero e
   il mese in cui i risparmi si esaurirebbero, anche nello scenario peggiore.
 - **Spiegazione** di ogni categoria: quanta parte dell'aumento viene

@@ -1078,6 +1078,7 @@ describe('calendario delle spese', () => {
     expect(chargesAt(annua, at('2028-03'))).toBe(true);
     expect(chargesAt(annua, at('2027-04'))).toBe(false);
     expect(describeSchedule(annua)).toBe('ogni anno a marzo');
+    expect(describeSchedule({ ...annua, month: 8 })).toBe('ogni anno ad agosto');
   });
 
   it('le rate iniziano e finiscono quando previsto', () => {
