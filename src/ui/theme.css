@@ -368,3 +368,28 @@ details summary {
 details[open] summary {
   margin-bottom: 8px;
 }
+
+/* --- selettore dell'anno ------------------------------------------------ */
+
+.year-slider {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border-radius: var(--radius);
+}
+.year-slider label {
+  font-size: 14px;
+}
+.year-slider input[type='range'] {
+  flex: 1;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  accent-color: var(--series-1);
+}
+button.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

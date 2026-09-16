@@ -28,8 +28,16 @@ import {
   project,
   summarize,
 } from '../src/core/project.js';
+import {
+  MONTHLY,
+  chargesAt,
+  describeSchedule,
+  lastInstallment,
+  monthlyEquivalent,
+} from '../src/core/schedule.js';
 import type {
   DataSnapshot,
+  ExpenseItem,
   HousingConfig,
   IndexSeries,
   Profile,
@@ -114,7 +122,8 @@ function makeProfile(overrides: Partial<Profile> = {}): Profile {
         id: 'e1',
         label: 'Spesa alimentare',
         category: 'food',
-        monthlyAmount: 300,
+        amount: 300,
+        schedule: MONTHLY,
         growthOverride: null,
       },
     ],
@@ -711,7 +720,8 @@ describe('override della crescita', () => {
           id: 'e1',
           label: 'Bolletta',
           category: 'food',
-          monthlyAmount: 100,
+          amount: 100,
+          schedule: MONTHLY,
           growthOverride: g,
         },
       ],
@@ -991,9 +1001,9 @@ describe('periodi', () => {
     );
   });
 
-  it('anche il reddito del periodo parziale e\u2019 proporzionato', () => {
-    // Reddito nominale fermo: l'unico effetto misurato e' la proporzione
-    // dei mesi, non l'adeguamento all'inflazione.
+  it('il reddito del periodo parziale conta le mensilita\u2019 pagate', () => {
+    // Reddito nominale fermo: l'unico effetto misurato e' il calendario
+    // delle mensilita', non l'adeguamento all'inflazione.
     const fermo = makeProfile({
       income: {
         monthlyNet: 2000,
@@ -1008,10 +1018,10 @@ describe('periodi', () => {
       anchorOverride: 0,
       confidence: 0.8,
     });
-    expect(res.years[1]!.incomeNominal).toBeCloseTo(
-      res.years[0]!.incomeNominal / 2,
-      6,
-    );
+    // Primo periodo pieno: tredici mensilita'. Da settembre a febbraio: sei
+    // stipendi piu' la tredicesima di dicembre, non sei e mezzo.
+    expect(res.years[0]!.incomeNominal).toBeCloseTo(13 * 2000, 6);
+    expect(res.years[1]!.incomeNominal).toBeCloseTo(7 * 2000, 6);
   });
 
   it('la crescita annua non e\u2019 falsata dal periodo parziale', () => {
@@ -1035,5 +1045,231 @@ describe('periodi', () => {
     });
     expect(res.startMonth).toBe('2026-09');
     expect(res.endMonth).toBe('2028-02');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Calendario delle spese
+// ---------------------------------------------------------------------------
+
+describe('calendario delle spese', () => {
+  const at = (t: string) => {
+    const [y, m] = t.split('-');
+    return Number(y) * 12 + Number(m) - 1;
+  };
+
+  it('una voce mensile si addebita ogni mese', () => {
+    for (const t of ['2026-09', '2026-12', '2027-01']) {
+      expect(chargesAt(MONTHLY, at(t))).toBe(true);
+    }
+  });
+
+  it('una cadenza bimestrale mantiene la fase a cavallo d’anno', () => {
+    const bim = { kind: 'recurring', everyMonths: 2, month: 1 } as const;
+    expect(chargesAt(bim, at('2026-11'))).toBe(true);
+    expect(chargesAt(bim, at('2026-12'))).toBe(false);
+    expect(chargesAt(bim, at('2027-01'))).toBe(true);
+    expect(chargesAt(bim, at('2027-02'))).toBe(false);
+  });
+
+  it('una spesa annuale cade solo nel suo mese', () => {
+    const annua = { kind: 'recurring', everyMonths: 12, month: 3 } as const;
+    expect(chargesAt(annua, at('2027-03'))).toBe(true);
+    expect(chargesAt(annua, at('2028-03'))).toBe(true);
+    expect(chargesAt(annua, at('2027-04'))).toBe(false);
+    expect(describeSchedule(annua)).toBe('ogni anno a marzo');
+  });
+
+  it('le rate iniziano e finiscono quando previsto', () => {
+    const rate = {
+      kind: 'installments',
+      firstMonth: '2026-11',
+      count: 3,
+      everyMonths: 1,
+    } as const;
+    expect(chargesAt(rate, at('2026-10'))).toBe(false);
+    expect(chargesAt(rate, at('2026-11'))).toBe(true);
+    expect(chargesAt(rate, at('2027-01'))).toBe(true);
+    expect(chargesAt(rate, at('2027-02'))).toBe(false);
+    expect(lastInstallment(rate)).toBe('2027-01');
+  });
+
+  it('una spesa una tantum cade in un solo mese', () => {
+    const once = { kind: 'once', month: '2028-10' } as const;
+    expect(chargesAt(once, at('2028-10'))).toBe(true);
+    expect(chargesAt(once, at('2029-10'))).toBe(false);
+  });
+
+  it('calcola l’equivalente mensile solo per le voci ricorrenti', () => {
+    const base = { id: 'x', label: 'x', category: 'food', growthOverride: null } as const;
+    expect(
+      monthlyEquivalent({
+        ...base,
+        amount: 600,
+        schedule: { kind: 'recurring', everyMonths: 12, month: 3 },
+      }),
+    ).toBeCloseTo(50, 10);
+    expect(
+      monthlyEquivalent({
+        ...base,
+        amount: 50,
+        schedule: { kind: 'installments', firstMonth: '2026-10', count: 5, everyMonths: 1 },
+      }),
+    ).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Proiezione mese per mese
+// ---------------------------------------------------------------------------
+
+describe('proiezione mensile', () => {
+  const scenario = (horizon: number) => ({
+    startMonth: '2026-09',
+    horizon,
+    anchorOverride: null,
+    confidence: 0.8,
+  });
+
+  /** Casa di proprieta' senza condominio: restano solo le voci indicate. */
+  function onlyItems(
+    items: ExpenseItem[],
+    overrides: Partial<Profile> = {},
+  ): Profile {
+    return makeProfile({
+      housing: { ...baseHousing, contractType: 'proprieta', monthlyRent: null },
+      expenses: items,
+      income: {
+        monthlyNet: 0,
+        monthsPerYear: 12,
+        inflationPassThrough: 0,
+        realGrowth: 0,
+      },
+      ...overrides,
+    });
+  }
+
+  const voce = (
+    amount: number,
+    schedule: ExpenseItem['schedule'],
+    label = 'Voce',
+  ): ExpenseItem => ({
+    id: label,
+    label,
+    category: 'food',
+    amount,
+    schedule,
+    growthOverride: null,
+  });
+
+  it('i mesi sommano esattamente ai totali dei periodi', () => {
+    const res = project(makeProfile(), makeSnapshot(), scenario(3.5));
+    expect(res.months).toHaveLength(42);
+    for (const y of res.years) {
+      const h = res.years.indexOf(y);
+      const ms = res.months.filter((m) => m.period === h);
+      const spend = ms.reduce((a, m) => a + m.spend, 0);
+      const income = ms.reduce((a, m) => a + m.income, 0);
+      expect(spend).toBeCloseTo(y.totalNominal, 6);
+      expect(income).toBeCloseTo(y.incomeNominal, 6);
+      expect(ms[ms.length - 1]!.wealth).toBeCloseTo(y.cumulativeWealth, 6);
+    }
+  });
+
+  it('una spesa annuale pesa tutta sul suo mese, ai prezzi del periodo', () => {
+    const p = onlyItems([
+      voce(600, { kind: 'recurring', everyMonths: 12, month: 3 }, 'Assicurazione'),
+    ]);
+    const res = project(p, makeSnapshot(), scenario(3));
+    const marzo27 = res.months.find((m) => m.month === '2027-03')!;
+    const aprile27 = res.months.find((m) => m.month === '2027-04')!;
+    const marzo28 = res.months.find((m) => m.month === '2028-03')!;
+    expect(marzo27.spend).toBeCloseTo(600, 6);
+    expect(aprile27.spend).toBe(0);
+    // Secondo periodo: rivalutata del 2% come la sua categoria.
+    expect(marzo28.spend).toBeCloseTo(612, 6);
+    expect(marzo27.charges.map((c) => c.label)).toContain('Assicurazione');
+    expect(res.years[0]!.totalNominal).toBeCloseTo(600, 6);
+  });
+
+  it('un periodo parziale senza il mese della scadenza non la conta', () => {
+    const p = onlyItems([
+      voce(600, { kind: 'recurring', everyMonths: 12, month: 3 }),
+    ]);
+    // Da settembre 2027 a febbraio 2028: marzo resta fuori.
+    const res = project(p, makeSnapshot(), scenario(1.5));
+    expect(res.years[1]!.totalNominal).toBe(0);
+  });
+
+  it('le rate restano fisse in euro, senza banda ne’ inflazione', () => {
+    const p = onlyItems([
+      voce(50, { kind: 'installments', firstMonth: '2026-10', count: 24, everyMonths: 1 }, 'Rate'),
+    ]);
+    const res = project(p, makeSnapshot(), scenario(3));
+    // Da ottobre 2026 ad agosto 2027: undici rate.
+    expect(res.years[0]!.totalNominal).toBeCloseTo(550, 6);
+    expect(res.years[1]!.totalNominal).toBeCloseTo(600, 6);
+    // L'ultima rata e' a settembre 2028.
+    expect(res.years[2]!.totalNominal).toBeCloseTo(50, 6);
+    const c = res.years[1]!.categories[0]!;
+    expect(c.lo).toBeCloseTo(c.nominal, 6);
+    expect(c.hi).toBeCloseTo(c.nominal, 6);
+    expect(c.attribution.base).toBeCloseTo(c.nominal, 6);
+    expect(c.attribution.fromAnchor + c.attribution.fromSpread).toBe(0);
+  });
+
+  it('una spesa una tantum futura viene rivalutata fino alla sua data', () => {
+    const p = onlyItems([voce(1000, { kind: 'once', month: '2028-10' }, 'Auto')]);
+    const res = project(p, makeSnapshot(), scenario(3));
+    const mese = res.months.find((m) => m.month === '2028-10')!;
+    expect(mese.spend).toBeCloseTo(1000 * 1.02 * 1.02, 6);
+    expect(res.years[0]!.totalNominal).toBe(0);
+  });
+
+  it('paga la tredicesima a dicembre e la quattordicesima a luglio', () => {
+    const p = onlyItems([], {
+      income: {
+        monthlyNet: 1000,
+        monthsPerYear: 14,
+        inflationPassThrough: 0,
+        realGrowth: 0,
+      },
+    });
+    const res = project(p, makeSnapshot(), scenario(1));
+    const by = (t: string) => res.months.find((m) => m.month === t)!;
+    expect(by('2026-12').income).toBeCloseTo(2000, 6);
+    expect(by('2027-07').income).toBeCloseTo(2000, 6);
+    expect(by('2026-11').income).toBeCloseTo(1000, 6);
+    expect(by('2026-12').charges[0]!.label).toBe('Tredicesima');
+    expect(res.years[0]!.incomeNominal).toBeCloseTo(14_000, 6);
+  });
+
+  it('capitalizza il rendimento mese per mese', () => {
+    const p = onlyItems([], { initialSavings: 12_000, savingsReturn: 0.12 });
+    const res = project(p, makeSnapshot(), scenario(1));
+    expect(res.years[0]!.cumulativeWealth).toBeCloseTo(12_000 * 1.12, 6);
+  });
+
+  it('individua il mese in cui i risparmi finiscono', () => {
+    const p = onlyItems([voce(300, MONTHLY)], { initialSavings: 1000 });
+    const s = summarize(project(p, makeSnapshot(), scenario(2)));
+    // 1000 -> 700 (set) -> 400 (ott) -> 100 (nov) -> -200 (dic).
+    expect(s.depletionMonth).toBe('2026-12');
+  });
+
+  it('le imposte del contratto cadono nel mese della ricorrenza', () => {
+    const res = project(makeProfile({ expenses: [] }), makeSnapshot(), scenario(2));
+    const [m0, m1] = res.months;
+    expect(m0!.spend).toBeGreaterThan(m1!.spend);
+    expect(m0!.charges.some((c) => c.label.startsWith('Imposte'))).toBe(true);
+  });
+
+  it('la spesa annua di riepilogo usa i primi e gli ultimi dodici mesi', () => {
+    const res = project(makeProfile(), makeSnapshot(), scenario(1.5));
+    const s = summarize(res);
+    const first12 = res.months.slice(0, 12).reduce((a, m) => a + m.spend, 0);
+    const last12 = res.months.slice(-12).reduce((a, m) => a + m.spend, 0);
+    expect(s.baseSpend).toBeCloseTo(first12, 6);
+    expect(s.finalSpend).toBeCloseTo(last12, 6);
   });
 });

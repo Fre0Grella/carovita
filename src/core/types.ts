@@ -205,13 +205,45 @@ export interface HousingConfig {
   condoFees: number;
 }
 
+/**
+ * Quando viene addebitata una voce di spesa.
+ *
+ * Non tutte le spese sono mensili, e trattarle come se lo fossero nasconde
+ * proprio i mesi difficili: l'assicurazione dell'auto a marzo, la bolletta
+ * bimestrale, le rate di un acquisto. Il calendario delle uscite conta quanto
+ * il loro totale.
+ */
+export type ExpenseSchedule =
+  /**
+   * Addebito ricorrente ogni `everyMonths` mesi (1 = mensile, 12 = annuale).
+   * `month` (1-12) è un mese in cui l'addebito avviene: fissa la fase, per
+   * esempio marzo per un'assicurazione annuale. `everyMonths` deve dividere
+   * 12, così la cadenza resta la stessa ogni anno.
+   */
+  | { kind: 'recurring'; everyMonths: number; month: number }
+  /**
+   * Pagamento a rate: `count` rate ogni `everyMonths` mesi a partire da
+   * `firstMonth` (`YYYY-MM`). L'importo della rata è fisso in euro: una
+   * rata concordata non segue l'inflazione.
+   */
+  | { kind: 'installments'; firstMonth: string; count: number; everyMonths: number }
+  /**
+   * Spesa una tantum nel mese `month` (`YYYY-MM`), espressa ai prezzi di oggi
+   * e rivalutata con la categoria fino a quella data.
+   */
+  | { kind: 'once'; month: string };
+
 /** Una voce di spesa configurabile dall'utente. */
 export interface ExpenseItem {
   id: string;
   label: string;
   category: CategoryId;
-  /** Spesa mensile corrente in EUR (valore nominale di oggi). */
-  monthlyAmount: number;
+  /**
+   * Importo di ogni addebito in EUR, ai prezzi di oggi: al mese per una voce
+   * mensile, a scadenza per le altre, a rata per i pagamenti rateali.
+   */
+  amount: number;
+  schedule: ExpenseSchedule;
   /**
    * Tasso di crescita annuo imposto dall'utente, in frazione.
    *
@@ -327,6 +359,18 @@ export interface CategoryYearProjection {
   attribution: Attribution;
   /** Tasso di inflazione applicato alla categoria in quell'anno, in frazione. */
   rate: number;
+  /** Voce di spesa di origine; `null` per l'abitazione. */
+  itemId: string | null;
+  /** Cadenza degli addebiti; `null` per l'abitazione. */
+  schedule: ExpenseSchedule | null;
+  /**
+   * Prezzo di un singolo addebito oggi e nel periodo, in EUR: la bolletta,
+   * la rata, il premio annuale; per l'abitazione, il canone mensile a tuo
+   * carico. È il modo più concreto di mostrare l'inflazione: la stessa
+   * cosa, due prezzi.
+   */
+  unitBase: number;
+  unitAmount: number;
 }
 
 export interface ProjectionEvent {
@@ -403,9 +447,47 @@ export interface YearProjection {
   events: ProjectionEvent[];
 }
 
+/**
+ * Un mese della proiezione.
+ *
+ * I periodi annuali restano l'unità in cui vivono le regole (scatti ISTAT,
+ * imposta di registro, stima dell'inflazione); i mesi ne sono la
+ * scomposizione nel calendario. La somma dei mesi di un periodo coincide
+ * esattamente con i totali del periodo.
+ */
+export interface MonthProjection {
+  /** Mesi trascorsi dall'inizio della proiezione (0 = mese corrente). */
+  index: number;
+  /** Mese, `YYYY-MM`. */
+  month: string;
+  /** Indice del periodo annuale a cui appartiene. */
+  period: number;
+  /** Livello generale dei prezzi rispetto a oggi (1 = prezzi di oggi). */
+  priceLevel: number;
+  /** Uscite del mese, in EUR nominali. */
+  spend: number;
+  spendLo: number;
+  spendHi: number;
+  /** Entrate del mese, in EUR nominali (tredicesima e quattordicesima incluse). */
+  income: number;
+  /** Patrimonio a fine mese, in EUR nominali. */
+  wealth: number;
+  wealthLo: number;
+  wealthHi: number;
+  /**
+   * Addebiti non mensili del mese (spese annuali, rate, una tantum, imposte
+   * del contratto): spiegano i picchi del grafico.
+   */
+  charges: { label: string; amount: number }[];
+}
+
 export interface ProjectionResult {
   profileId: string;
   profileName: string;
+  /** Scomposizione mese per mese dei periodi. */
+  months: MonthProjection[];
+  /** Patrimonio di partenza, in EUR: il punto da cui parte la curva. */
+  initialSavings: number;
   /** Mese di partenza della proiezione, `YYYY-MM`. */
   startMonth: string;
   /** Ultimo mese coperto dalla proiezione, `YYYY-MM`. */

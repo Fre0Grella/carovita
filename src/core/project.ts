@@ -15,6 +15,7 @@ import {
   type RateDecomposition,
 } from './model.js';
 import { buildRentSchedule, computeShare, contractLabel } from './rent.js';
+import { calendarMonth, chargesAt, isFixedNominal } from './schedule.js';
 import { monthIndex, monthLabel, shortMonthLabel } from './series.js';
 import type {
   Attribution,
@@ -23,6 +24,7 @@ import type {
   CategoryYearProjection,
   DataSnapshot,
   ExpenseItem,
+  MonthProjection,
   Period,
   Profile,
   ProjectionEvent,
@@ -81,6 +83,12 @@ export function buildPeriods(startMonth: string, horizon: number): Period[] {
   }
   return periods;
 }
+
+/**
+ * Mesi di calendario delle mensilità aggiuntive, nell'ordine in cui si
+ * aggiungono: tredicesima a dicembre, quattordicesima a luglio.
+ */
+const EXTRA_PAY_MONTHS = [12, 7];
 
 /**
  * Calcola la proiezione completa per un profilo.
@@ -172,7 +180,19 @@ export function project(
     condoIndex,
   });
 
-  // --- Voci di spesa ordinarie ---------------------------------------------
+  // --- Calendario ------------------------------------------------------------
+  // Ogni periodo annuale occupa un blocco di mesi consecutivi. I mesi servono
+  // a collocare le uscite quando avvengono davvero: un'assicurazione annuale
+  // pesa tutta sul suo mese, non un dodicesimo al mese.
+  const startIdx = monthIndex(periods[0]!.startMonth);
+  const periodFirstMonth: number[] = [];
+  let totalMonths = 0;
+  for (const p of periods) {
+    periodFirstMonth.push(totalMonths);
+    totalMonths += p.months;
+  }
+
+  // --- Voci di spesa -------------------------------------------------------
   const items: ExpenseItem[] = [...profile.utilities, ...profile.expenses];
 
   // L'indice cumulato dipende solo dalla categoria, non dall'anno: si calcola
@@ -199,13 +219,33 @@ export function project(
   ): ReturnType<typeof cumulativeIndex> => {
     if (item.growthOverride === null) return pathByCategory.get(item.category)!;
     const g = item.growthOverride;
-    return Array.from({ length: horizon + 1 }, (_, k) => ({
+    return Array.from({ length: headlinePath.length }, (_, k) => ({
       level: Math.pow(1 + g, k),
       rate: { anchor: 0, spread: 0, persistence: 0, total: k === 0 ? 0 : g },
     }));
   };
 
+  // Mesi di addebito di ogni voce, come scostamento dall'inizio.
+  const chargeMonths = items.map((item) => {
+    const out: number[] = [];
+    for (let m = 0; m < totalMonths; m++) {
+      if (chargesAt(item.schedule, startIdx + m)) out.push(m);
+    }
+    return out;
+  });
+
+  // Mensilità aggiuntive: la tredicesima si paga a dicembre, la
+  // quattordicesima di norma a luglio. Contano per capire quando il
+  // patrimonio respira, non solo quanto cresce in un anno.
+  const extraPayMonths = EXTRA_PAY_MONTHS.slice(
+    0,
+    Math.max(0, Math.round(profile.income.monthsPerYear) - 12),
+  );
+  const regularShare = Math.min(12, profile.income.monthsPerYear) / 12;
+
   const years: YearProjection[] = [];
+  const months: MonthProjection[] = [];
+  const monthlyReturn = Math.pow(1 + profile.savingsReturn, 1 / 12);
   let wealth = profile.initialSavings;
   // Stesse ricorsioni sugli estremi della banda di spesa: spendendo di piu'
   // si accumula di meno, quindi la spesa alta genera il patrimonio basso.
@@ -215,11 +255,19 @@ export function project(
   for (let h = 0; h < periods.length; h++) {
     const period = periods[h]!;
     const year = period.year;
-    // Un periodo parziale vale in proporzione ai mesi che copre.
-    const f = period.fraction;
+    const first = periodFirstMonth[h]!;
     const priceLevel = headlinePath[h]!.level;
     const categories: CategoryYearProjection[] = [];
     const events: ProjectionEvent[] = [...(rentSchedule[h]?.events ?? [])];
+
+    // Uscite di ogni mese del periodo, con la loro banda, e addebiti non
+    // mensili da mostrare nel dettaglio del mese.
+    const entries: { nominal: number; lo: number; hi: number }[][] =
+      Array.from({ length: period.months }, () => []);
+    const charges: { label: string; amount: number }[][] = Array.from(
+      { length: period.months },
+      () => [],
+    );
 
     // Voce abitazione, trattata a parte perche' segue le regole contrattuali.
     const rentYear = rentSchedule[h]!;
@@ -260,23 +308,56 @@ export function project(
         hi: contractual * rentBand.hi,
         attribution: split,
         rate: rentDecomp.total,
+        itemId: null,
+        schedule: null,
+        unitBase: base0.monthlyRent,
+        unitAmount: rentYear.monthlyRent,
       });
+
+      // Canone e condominio si pagano ogni mese; le imposte del contratto
+      // una volta l'anno, alla ricorrenza, che coincide con l'inizio del
+      // periodo.
+      const perMonth = (rentYear.annualRent + rentYear.condoFees) / period.months;
+      const taxes = rentYear.registrationTax + rentYear.stampDuty;
+      for (let k = 0; k < period.months; k++) {
+        const amount = perMonth + (k === 0 ? taxes : 0);
+        entries[k]!.push({
+          nominal: amount,
+          lo: amount * rentBand.lo,
+          hi: amount * rentBand.hi,
+        });
+      }
+      if (taxes > 0.5) {
+        charges[0]!.push({
+          label: 'Imposte del contratto d’affitto',
+          amount: taxes,
+        });
+      }
     }
 
     // Tutte le altre voci.
-    for (const item of items) {
+    items.forEach((item, i) => {
       const model = modelFor(models, item.category) ?? headlineModel;
       const overridden = item.growthOverride !== null;
+      const fixed = isFixedNominal(item.schedule);
       const path = pathForItem(item);
-      const base = item.monthlyAmount * 12 * f;
-      const nominal = base * path[h]!.level;
-      // Con un tasso scelto dall'utente l'incertezza del modello non si
-      // applica: l'ipotesi e' sua, e disegnarle intorno una banda statistica
+      const inPeriod = chargeMonths[i]!.filter(
+        (m) => m >= first && m < first + period.months,
+      );
+
+      // Ogni addebito costa l'importo ai prezzi di oggi rivalutato al livello
+      // del periodo; le rate restano ferme in euro.
+      const level = fixed ? 1 : path[h]!.level;
+      const base = item.amount * inPeriod.length;
+      const nominal = base * level;
+      // Con un tasso scelto dall'utente, o con una rata fissa, l'incertezza
+      // del modello non si applica: disegnarle intorno una banda statistica
       // suggerirebbe una precisione che non esiste.
-      const band = overridden
-        ? { lo: 1, hi: 1 }
-        : uncertaintyBand(model, h, confidence);
-      const decomp = h === 0 ? zeroRate() : path[h]!.rate;
+      const band =
+        overridden || fixed
+          ? { lo: 1, hi: 1 }
+          : uncertaintyBand(model, h, confidence);
+      const decomp = h === 0 || fixed ? zeroRate() : path[h]!.rate;
 
       categories.push({
         category: item.category,
@@ -286,10 +367,30 @@ export function project(
         real: nominal / priceLevel,
         lo: nominal * band.lo,
         hi: nominal * band.hi,
-        attribution: splitAttribution(base, nominal, decomp, h, overridden),
+        attribution: fixed
+          ? splitAttribution(nominal, nominal, decomp, 0)
+          : splitAttribution(base, nominal, decomp, h, overridden),
         rate: decomp.total,
+        itemId: item.id,
+        schedule: item.schedule,
+        unitBase: item.amount,
+        unitAmount: item.amount * level,
       });
-    }
+
+      const unit = item.amount * level;
+      const isMonthly =
+        item.schedule.kind === 'recurring' && item.schedule.everyMonths === 1;
+      for (const m of inPeriod) {
+        entries[m - first]!.push({
+          nominal: unit,
+          lo: unit * band.lo,
+          hi: unit * band.hi,
+        });
+        if (!isMonthly && unit > 0) {
+          charges[m - first]!.push({ label: item.label, amount: unit });
+        }
+      }
+    });
 
     const totalNominal = categories.reduce((a, c) => a + c.nominal, 0);
     // Le bande si aggregano secondo la correlazione stimata, non sommando gli
@@ -314,39 +415,65 @@ export function project(
       priceLevel,
       profile.income.inflationPassThrough,
     );
-    const incomeNominal =
+    const pay =
       profile.income.monthlyNet *
-      profile.income.monthsPerYear *
       incomeInflation *
-      Math.pow(1 + profile.income.realGrowth, h) *
-      f;
+      Math.pow(1 + profile.income.realGrowth, h);
 
-    const savings = incomeNominal - totalNominal;
-    const savingsLo = incomeNominal - totalHi;
-    const savingsHi = incomeNominal - totalLo;
-    if (h > 0) {
-      const r = 1 + profile.savingsReturn;
-      wealth = wealth * r + savings;
-      wealthLo = wealthLo * r + savingsLo;
-      wealthHi = wealthHi * r + savingsHi;
-    } else {
-      wealth = profile.initialSavings + savings;
-      wealthLo = profile.initialSavings + savingsLo;
-      wealthHi = profile.initialSavings + savingsHi;
+    let incomeNominal = 0;
+    for (let k = 0; k < period.months; k++) {
+      const m = first + k;
+      const cal = calendarMonth(startIdx + m);
+      const extra = extraPayMonths.filter((x) => x === cal).length;
+      const income = pay * (regularShare + extra);
+      incomeNominal += income;
+
+      const e = entries[k]!;
+      const spend = e.reduce((a, x) => a + x.nominal, 0);
+      const spendLo =
+        spend - aggregateHalfWidths(e.map((x) => x.nominal - x.lo), rho);
+      const spendHi =
+        spend + aggregateHalfWidths(e.map((x) => x.hi - x.nominal), rho);
+
+      wealth = wealth * monthlyReturn + income - spend;
+      wealthLo = wealthLo * monthlyReturn + income - spendHi;
+      wealthHi = wealthHi * monthlyReturn + income - spendLo;
+
+      if (extra > 0) {
+        charges[k]!.unshift({
+          label: cal === 12 ? 'Tredicesima' : 'Quattordicesima',
+          amount: pay * extra,
+        });
+      }
+
+      months.push({
+        index: m,
+        month: monthLabel(startIdx + m),
+        period: h,
+        priceLevel,
+        spend,
+        spendLo,
+        spendHi,
+        income,
+        wealth,
+        wealthLo,
+        wealthHi,
+        charges: charges[k]!,
+      });
     }
 
     years.push({
       year,
       label: period.label,
       labelLong: period.labelLong,
-      fraction: f,
+      fraction: period.fraction,
       priceLevel,
       totalNominal,
       totalReal: totalNominal / priceLevel,
       totalLo,
       totalHi,
       incomeNominal,
-      savingsNominal: savings,
+      savingsNominal: incomeNominal - totalNominal,
       cumulativeWealth: wealth,
       cumulativeWealthLo: wealthLo,
       cumulativeWealthHi: wealthHi,
@@ -361,6 +488,8 @@ export function project(
     startMonth: periods[0]!.startMonth,
     endMonth: periods[periods.length - 1]!.endMonth,
     baseYear,
+    months,
+    initialSavings: profile.initialSavings,
     years,
     models,
     anchor,
@@ -478,11 +607,11 @@ export function forecastRatesByCategory(
 export interface ProfileSummary {
   profileId: string;
   profileName: string;
-  /** Spesa annua nell'anno base, in EUR. */
+  /** Spesa dei primi dodici mesi, in EUR. */
   baseSpend: number;
-  /** Spesa annua nell'ultimo anno, in EUR nominali. */
+  /** Spesa degli ultimi dodici mesi dell'orizzonte, in EUR nominali. */
   finalSpend: number;
-  /** Spesa annua nell'ultimo anno, in EUR costanti dell'anno base. */
+  /** Come sopra, in EUR di oggi. */
   finalSpendReal: number;
   /** Spesa totale cumulata sull'orizzonte, in EUR nominali. */
   cumulativeSpend: number;
@@ -502,23 +631,44 @@ export interface ProfileSummary {
   depletionYear: number | null;
   /** Come sopra, ma nello scenario di spesa alta. */
   depletionYearLo: number | null;
+  /**
+   * Primo mese, `YYYY-MM`, in cui il patrimonio va sotto zero. Più preciso
+   * dell'anno: una spesa annuale può mandare in rosso a marzo un patrimonio
+   * che la tredicesima riporta sopra zero a dicembre.
+   */
+  depletionMonth: string | null;
+  depletionMonthLo: string | null;
 }
 
 export function summarize(result: ProjectionResult): ProfileSummary {
   const first = result.years[0]!;
   const last = result.years[result.years.length - 1]!;
-  const n = result.years.length - 1;
   const cumulativeSpend = result.years.reduce((a, y) => a + y.totalNominal, 0);
-  // Il tasso di crescita va calcolato su importi annualizzati: confrontare un
-  // periodo pieno con uno parziale darebbe una crescita fittiziamente
-  // negativa.
-  const lastAnnualised = last.fraction > 0 ? last.totalNominal / last.fraction : 0;
+
+  // Spesa annua a inizio e fine orizzonte: i primi e gli ultimi dodici mesi.
+  // Confrontare un periodo pieno con uno parziale darebbe una crescita
+  // fittiziamente negativa, e annualizzare un periodo di sei mesi falserebbe
+  // le spese che cadono una volta l'anno.
+  const months = result.months;
+  const window = Math.min(12, months.length);
+  const scale = window > 0 ? 12 / window : 0;
+  const head = months.slice(0, window);
+  const tail = months.slice(months.length - window);
+  const baseSpend = head.reduce((a, m) => a + m.spend, 0) * scale;
+  const finalSpend = tail.reduce((a, m) => a + m.spend, 0) * scale;
+  const finalSpendReal =
+    tail.reduce((a, m) => a + m.spend / m.priceLevel, 0) * scale;
+  const yearsBetween = (months.length - window) / 12;
   const cagr =
-    n > 0 && first.totalNominal > 0
-      ? Math.pow(lastAnnualised / first.totalNominal, 1 / n) - 1
+    yearsBetween > 0 && baseSpend > 0
+      ? Math.pow(finalSpend / baseSpend, 1 / yearsBetween) - 1
       : 0;
+
   const firstNegative = (pick: (y: YearProjection) => number): number | null =>
     result.years.find((y) => pick(y) < 0)?.year ?? null;
+  const firstNegativeMonth = (
+    pick: (m: MonthProjection) => number,
+  ): string | null => months.find((m) => pick(m) < 0)?.month ?? null;
 
   return {
     profileId: result.profileId,
@@ -526,9 +676,11 @@ export function summarize(result: ProjectionResult): ProfileSummary {
     savingsFirstYear: first.savingsNominal,
     depletionYear: firstNegative((y) => y.cumulativeWealth),
     depletionYearLo: firstNegative((y) => y.cumulativeWealthLo),
-    baseSpend: first.totalNominal,
-    finalSpend: lastAnnualised,
-    finalSpendReal: last.priceLevel > 0 ? lastAnnualised / last.priceLevel : 0,
+    depletionMonth: firstNegativeMonth((m) => m.wealth),
+    depletionMonthLo: firstNegativeMonth((m) => m.wealthLo),
+    baseSpend,
+    finalSpend,
+    finalSpendReal,
     cumulativeSpend,
     finalWealth: last.cumulativeWealth,
     finalWealthReal: last.cumulativeWealth / last.priceLevel,

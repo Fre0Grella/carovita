@@ -196,6 +196,13 @@ export function DataPanel({ snapshot, result }: Props): JSX.Element {
             differenza fra due numeri grandi e vicini.
           </p>
           <p className="small">
+            La previsione è annuale, ma i conti sono fatti mese per mese: i
+            prezzi si aggiornano ogni dodici mesi, le spese non mensili pesano
+            tutte nel mese in cui le paghi, le rate restano fisse in euro, la
+            tredicesima arriva a dicembre e la quattordicesima a luglio. La
+            somma dei mesi coincide sempre con il totale dell’anno.
+          </p>
+          <p className="small">
             <strong>Limite noto:</strong> le bande di incertezza sono ben
             calibrate a uno o due anni, ma diventano troppo strette sugli
             orizzonti lunghi. In trent’anni l’Italia è passata per il cambio

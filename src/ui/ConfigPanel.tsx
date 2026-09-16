@@ -11,11 +11,20 @@ import type {
   CityRentQuote,
   ContractType,
   ExpenseItem,
+  ExpenseSchedule,
   Profile,
   SharingConfig,
   ZoneTier,
 } from '../core/types.js';
 import { computeShare, contractLabel } from '../core/rent.js';
+import {
+  MONTHLY,
+  MONTH_NAMES,
+  describeSchedule,
+  lastInstallment,
+  monthlyEquivalent,
+} from '../core/schedule.js';
+import { shortMonthLabel } from '../core/series.js';
 import { CityPicker } from './CityPicker.js';
 import { CATEGORY_LABELS, SELECTABLE_CATEGORIES } from './defaults.js';
 import { eur, pct } from './format.js';
@@ -29,6 +38,8 @@ interface Props {
    * lasciare un campo vuoto che sembra dire «crescita zero».
    */
   forecastRates: Map<CategoryId, number>;
+  /** Mese di partenza della proiezione, `YYYY-MM`: default per rate e date. */
+  startMonth: string;
 }
 
 const CONTRACTS: ContractType[] = [
@@ -49,6 +60,7 @@ export function ConfigPanel({
   profile,
   onChange,
   forecastRates,
+  startMonth,
 }: Props): JSX.Element {
   const h = profile.housing;
   const set = (patch: Partial<Profile>): void =>
@@ -477,6 +489,7 @@ export function ConfigPanel({
         description="Bollette e servizi legati alla casa."
         items={profile.utilities}
         forecastRates={forecastRates}
+        startMonth={startMonth}
         onChange={(utilities) => set({ utilities })}
       />
 
@@ -485,6 +498,7 @@ export function ConfigPanel({
         description="Tutto il resto: alimentari, trasporti, tempo libero."
         items={profile.expenses}
         forecastRates={forecastRates}
+        startMonth={startMonth}
         onChange={(expenses) => set({ expenses })}
       />
 
@@ -619,6 +633,7 @@ interface ListProps {
   description: string;
   items: ExpenseItem[];
   forecastRates: Map<CategoryId, number>;
+  startMonth: string;
   onChange: (items: ExpenseItem[]) => void;
 }
 
@@ -627,9 +642,11 @@ function ExpenseList({
   description,
   items,
   forecastRates,
+  startMonth,
   onChange,
 }: ListProps): JSX.Element {
-  const total = items.reduce((a, i) => a + i.monthlyAmount, 0);
+  const recurring = items.reduce((a, i) => a + monthlyEquivalent(i), 0);
+  const others = items.filter((i) => i.schedule.kind !== 'recurring').length;
 
   const update = (id: string, patch: Partial<ExpenseItem>): void =>
     onChange(items.map((i) => (i.id === id ? { ...i, ...patch } : i)));
@@ -638,7 +655,15 @@ function ExpenseList({
     <div className="card">
       <h2>{title}</h2>
       <p className="muted small" style={{ marginTop: -4 }}>
-        {description} Totale attuale: <strong>{eur(total)}</strong> al mese.
+        {description} Voci ricorrenti: <strong>{eur(recurring)}</strong> al mese
+        in media
+        {others > 0 && (
+          <>
+            , più {others} {others === 1 ? 'spesa' : 'spese'} a rate o una
+            tantum
+          </>
+        )}
+        .
       </p>
 
       <div className="table-wrap">
@@ -647,20 +672,21 @@ function ExpenseList({
             <tr>
               <th>Voce</th>
               <th>Categoria di prezzo</th>
-              <th>€/mese</th>
+              <th style={{ textAlign: 'left' }}>Quando</th>
+              <th>Importo</th>
               <th>Crescita annua prevista</th>
               <th />
             </tr>
           </thead>
           <tbody>
             {items.map((i) => (
-              <tr key={i.id}>
+              <tr key={i.id} style={{ verticalAlign: 'top' }}>
                 <td>
                   <input
                     aria-label="Nome della voce"
                     value={i.label}
                     onChange={(e) => update(i.id, { label: e.target.value })}
-                    style={{ width: 170 }}
+                    style={{ width: 160 }}
                   />
                 </td>
                 <td>
@@ -678,24 +704,39 @@ function ExpenseList({
                     ))}
                   </select>
                 </td>
+                <ScheduleCell
+                  item={i}
+                  startMonth={startMonth}
+                  onChange={(schedule) => update(i.id, { schedule })}
+                />
                 <td>
                   <input
-                    aria-label="Importo mensile"
+                    aria-label={`Importo di ${i.label}`}
                     type="number"
                     min={0}
                     step={5}
-                    value={i.monthlyAmount}
+                    value={i.amount}
                     onChange={(e) =>
-                      update(i.id, { monthlyAmount: Number(e.target.value) })
+                      update(i.id, { amount: Number(e.target.value) })
                     }
                     style={{ width: 90 }}
                   />
+                  <span className="muted small"> € {amountSuffix(i.schedule)}</span>
+                  <AmountHint item={i} />
                 </td>
-                <GrowthCell
-                  item={i}
-                  predicted={forecastRates.get(i.category)}
-                  onChange={(v) => update(i.id, { growthOverride: v })}
-                />
+                {i.schedule.kind === 'installments' ? (
+                  <td>
+                    <div className="hint" style={{ whiteSpace: 'normal', maxWidth: 190 }}>
+                      Rata fissa: un importo concordato non segue l’inflazione.
+                    </div>
+                  </td>
+                ) : (
+                  <GrowthCell
+                    item={i}
+                    predicted={forecastRates.get(i.category)}
+                    onChange={(v) => update(i.id, { growthOverride: v })}
+                  />
+                )}
                 <td>
                   <button
                     className="btn danger"
@@ -723,7 +764,8 @@ function ExpenseList({
                 id: `v-${Date.now().toString(36)}`,
                 label: 'Nuova voce',
                 category: 'misc',
-                monthlyAmount: 0,
+                amount: 0,
+                schedule: MONTHLY,
                 growthOverride: null,
               },
             ])
@@ -737,9 +779,236 @@ function ExpenseList({
         alla voce: l’energia e gli alimentari si comportano in modo molto
         diverso dalla media. La crescita mostrata è già quella prevista
         dal modello per quella categoria: scrivi un valore solo se vuoi
-        sostituirla con una tua ipotesi.
+        sostituirla con una tua ipotesi. Per le spese che non arrivano ogni
+        mese scegli la cadenza in «Quando»: l’importo è quello di ogni
+        addebito, e il grafico mensile lo mostra nel mese in cui lo paghi.
       </p>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+
+type Preset = 'm1' | 'm2' | 'm3' | 'm6' | 'm12' | 'rate' | 'once';
+
+const PRESETS: { id: Preset; label: string }[] = [
+  { id: 'm1', label: 'Ogni mese' },
+  { id: 'm2', label: 'Ogni 2 mesi' },
+  { id: 'm3', label: 'Ogni 3 mesi' },
+  { id: 'm6', label: 'Ogni 6 mesi' },
+  { id: 'm12', label: 'Una volta l’anno' },
+  { id: 'rate', label: 'A rate' },
+  { id: 'once', label: 'Una tantum' },
+];
+
+function presetOf(s: ExpenseSchedule): Preset {
+  if (s.kind === 'installments') return 'rate';
+  if (s.kind === 'once') return 'once';
+  const n = s.everyMonths;
+  return n === 12 ? 'm12' : n === 6 ? 'm6' : n === 3 || n === 4 ? 'm3' : n === 2 ? 'm2' : 'm1';
+}
+
+function amountSuffix(s: ExpenseSchedule): string {
+  switch (presetOf(s)) {
+    case 'm1':
+      return 'al mese';
+    case 'm12':
+      return 'l’anno';
+    case 'rate':
+      return 'a rata';
+    case 'once':
+      return 'una volta';
+    default:
+      return 'ad addebito';
+  }
+}
+
+function AmountHint({ item }: { item: ExpenseItem }): JSX.Element {
+  const s = item.schedule;
+  let text: string | null = null;
+  if (s.kind === 'recurring' && s.everyMonths > 1) {
+    text = `circa ${eur(monthlyEquivalent(item))} al mese`;
+  } else if (s.kind === 'installments') {
+    text = `totale ${eur(item.amount * s.count)}`;
+  }
+  if (!text) return <></>;
+  return <div className="hint">{text}</div>;
+}
+
+/**
+ * Cella della cadenza: un menu di preset e, sotto, solo i campi che servono
+ * a quel preset (il mese dell'addebito annuale, numero e inizio delle rate,
+ * la data della spesa una tantum).
+ */
+function ScheduleCell({
+  item,
+  startMonth,
+  onChange,
+}: {
+  item: ExpenseItem;
+  startMonth: string;
+  onChange: (s: ExpenseSchedule) => void;
+}): JSX.Element {
+  const s = item.schedule;
+  const preset = presetOf(s);
+  const startCal = Number(startMonth.slice(5, 7));
+
+  const choose = (p: Preset): void => {
+    const month = s.kind === 'recurring' ? s.month : startCal;
+    switch (p) {
+      case 'rate':
+        onChange({ kind: 'installments', firstMonth: startMonth, count: 12, everyMonths: 1 });
+        return;
+      case 'once':
+        onChange({ kind: 'once', month: startMonth });
+        return;
+      default:
+        onChange({ kind: 'recurring', everyMonths: Number(p.slice(1)), month });
+    }
+  };
+
+  return (
+    <td style={{ textAlign: 'left' }}>
+      <select
+        aria-label={`Cadenza di ${item.label}`}
+        value={preset}
+        onChange={(e) => choose(e.target.value as Preset)}
+      >
+        {PRESETS.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.label}
+          </option>
+        ))}
+      </select>
+
+      {s.kind === 'recurring' && s.everyMonths > 1 && (
+        <div className="row" style={{ marginTop: 4, flexWrap: 'nowrap' }}>
+          <span className="small muted">{s.everyMonths === 12 ? 'a' : 'anche a'}</span>
+          <select
+            aria-label={`Mese di addebito di ${item.label}`}
+            value={s.month}
+            onChange={(e) => onChange({ ...s, month: Number(e.target.value) })}
+          >
+            {MONTH_NAMES.map((m, k) => (
+              <option key={m} value={k + 1}>
+                {m}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {s.kind === 'installments' && (
+        <div style={{ marginTop: 4 }}>
+          <div className="row" style={{ flexWrap: 'nowrap' }}>
+            <input
+              aria-label={`Numero di rate di ${item.label}`}
+              type="number"
+              min={1}
+              max={360}
+              step={1}
+              value={s.count}
+              onChange={(e) =>
+                onChange({ ...s, count: Math.max(1, Math.round(Number(e.target.value))) })
+              }
+              style={{ width: 64 }}
+            />
+            <select
+              aria-label={`Frequenza delle rate di ${item.label}`}
+              value={s.everyMonths}
+              onChange={(e) => onChange({ ...s, everyMonths: Number(e.target.value) })}
+            >
+              <option value={1}>rate mensili</option>
+              <option value={2}>rate bimestrali</option>
+              <option value={3}>rate trimestrali</option>
+              <option value={4}>rate quadrimestrali</option>
+              <option value={6}>rate semestrali</option>
+            </select>
+          </div>
+          <div className="row" style={{ marginTop: 4, flexWrap: 'nowrap' }}>
+            <span className="small muted">prima rata</span>
+            <MonthPicker
+              label={`Prima rata di ${item.label}`}
+              value={s.firstMonth}
+              startMonth={startMonth}
+              pastYears={5}
+              onChange={(firstMonth) => onChange({ ...s, firstMonth })}
+            />
+          </div>
+          <div className="hint">ultima rata a {shortMonthLabel(lastInstallment(s))}</div>
+        </div>
+      )}
+
+      {s.kind === 'once' && (
+        <div className="row" style={{ marginTop: 4, flexWrap: 'nowrap' }}>
+          <span className="small muted">a</span>
+          <MonthPicker
+            label={`Mese di ${item.label}`}
+            value={s.month}
+            startMonth={startMonth}
+            pastYears={0}
+            onChange={(month) => onChange({ ...s, month })}
+          />
+        </div>
+      )}
+
+      {s.kind === 'recurring' && s.everyMonths > 1 && s.everyMonths < 12 && (
+        <div className="hint">{describeSchedule(s)}</div>
+      )}
+    </td>
+  );
+}
+
+/**
+ * Scelta di un mese con due menu, mese e anno. `<input type="month">` non è
+ * supportato da tutti i browser e altrove diventa un campo di testo libero.
+ */
+function MonthPicker({
+  label,
+  value,
+  startMonth,
+  pastYears,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  startMonth: string;
+  pastYears: number;
+  onChange: (t: string) => void;
+}): JSX.Element {
+  const year = Number(value.slice(0, 4));
+  const month = Number(value.slice(5, 7));
+  const first = Number(startMonth.slice(0, 4)) - pastYears;
+  const years = Array.from({ length: pastYears + 31 }, (_, k) => first + k);
+  if (!years.includes(year)) years.unshift(year);
+  const emit = (y: number, m: number): void =>
+    onChange(`${y}-${String(m).padStart(2, '0')}`);
+
+  return (
+    <>
+      <select
+        aria-label={`${label}: mese`}
+        value={month}
+        onChange={(e) => emit(year, Number(e.target.value))}
+      >
+        {MONTH_NAMES.map((m, k) => (
+          <option key={m} value={k + 1}>
+            {m.slice(0, 3)}
+          </option>
+        ))}
+      </select>
+      <select
+        aria-label={`${label}: anno`}
+        value={year}
+        onChange={(e) => emit(Number(e.target.value), month)}
+      >
+        {years.map((y) => (
+          <option key={y} value={y}>
+            {y}
+          </option>
+        ))}
+      </select>
+    </>
   );
 }
 

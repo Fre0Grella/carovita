@@ -12,6 +12,7 @@ import {
   currentMonth,
   forecastRatesByCategory,
   project,
+  summarize,
 } from '../core/project.js';
 import type {
   CategoryId,
@@ -62,7 +63,10 @@ export function App(): JSX.Element {
     stored?.anchorOverride ?? null,
   );
   const [confidence, setConfidence] = useState(stored?.confidence ?? 0.8);
-  const [real, setReal] = useState(true);
+  // Anno esaminato con lo slider, condiviso fra previsione e confronto. Si
+  // conserva il valore scelto e lo si limita al momento dell'uso: accorciando
+  // e riallungando l'orizzonte la scelta non va persa. Di partenza, l'ultimo.
+  const [selectedYear, setSelectedYear] = useState(Number.MAX_SAFE_INTEGER);
 
   useEffect(() => {
     loadSnapshot()
@@ -94,6 +98,10 @@ export function App(): JSX.Element {
   }, [snapshot, profiles, startMonth, horizon, anchorOverride, confidence]);
 
   const activeResult = results.find((r) => r.profileId === activeId) ?? results[0];
+  const selected = Math.min(
+    selectedYear,
+    Math.max(0, (activeResult?.years.length ?? 1) - 1),
+  );
 
   // Previsione per categoria, mostrata accanto a ogni voce di spesa: cosi'
   // la stima del modello e' visibile gia' in configurazione.
@@ -177,7 +185,6 @@ export function App(): JSX.Element {
               ))}
             </select>
           </div>
-
           <div className="field">
             <label htmlFor="s-horizon">
               Orizzonte:{' '}
@@ -245,22 +252,6 @@ export function App(): JSX.Element {
               <option value={0.9}>90%</option>
             </select>
           </div>
-
-          <div className="field checkbox" style={{ alignSelf: 'end' }}>
-            <input
-              id="s-real"
-              type="checkbox"
-              checked={real}
-              onChange={(e) => setReal(e.target.checked)}
-            />
-            <div>
-              <label htmlFor="s-real">Mostra in euro di oggi</label>
-              <div className="hint">
-                Toglie l’effetto dell’inflazione, così i confronti fra anni
-                diversi sono leggibili.
-              </div>
-            </div>
-          </div>
         </div>
 
         <div className="row" style={{ marginTop: 10 }}>
@@ -302,7 +293,7 @@ export function App(): JSX.Element {
       </div>
 
       {/* --- riepilogo --------------------------------------------------- */}
-      {activeResult && <Summary result={activeResult} real={real} />}
+      {activeResult && <Summary result={activeResult} />}
 
       {/* --- schede ------------------------------------------------------ */}
       <div className="tabs" role="tablist">
@@ -323,10 +314,15 @@ export function App(): JSX.Element {
           profile={active}
           onChange={updateActive}
           forecastRates={forecastRates}
+          startMonth={startMonth}
         />
       )}
       {tab === 'previsione' && activeResult && (
-        <Forecast result={activeResult} real={real} />
+        <Forecast
+          result={activeResult}
+          selected={selected}
+          onSelect={setSelectedYear}
+        />
       )}
       {tab === 'confronto' && (
         <Compare
@@ -334,7 +330,8 @@ export function App(): JSX.Element {
           colors={profiles.map(
             (_, i) => PROFILE_COLORS[i % PROFILE_COLORS.length]!,
           )}
-          real={real}
+          selected={selected}
+          onSelect={setSelectedYear}
         />
       )}
       {tab === 'dati' && activeResult && (
@@ -353,39 +350,30 @@ export function App(): JSX.Element {
 
 // ---------------------------------------------------------------------------
 
-function Summary({
-  result,
-  real,
-}: {
-  result: ProjectionResult;
-  real: boolean;
-}): JSX.Element {
-  const first = result.years[0]!;
-  const last = result.years[result.years.length - 1]!;
-  const spendNow = first.totalNominal;
-  // L'ultimo periodo puo' durare meno di un anno: la spesa va annualizzata.
-  const spendEnd = (real ? last.totalReal : last.totalNominal) / last.fraction;
-  const savingNow = first.savingsNominal;
-  const wealth = real
-    ? last.cumulativeWealth / last.priceLevel
-    : last.cumulativeWealth;
+function Summary({ result }: { result: ProjectionResult }): JSX.Element {
+  const s = summarize(result);
+  const end = shortMonthLabel(result.endMonth);
 
+  // Gli importi futuri sono in euro correnti, cioe' quelli che vedrai sul
+  // conto; il loro valore in euro di oggi sta sotto, invece che dietro un
+  // interruttore che cambia tutti i numeri.
   const cells = [
-    { label: `Spesa annua oggi`, value: eur(spendNow) },
+    { label: 'Spesa nei prossimi 12 mesi', value: eur(s.baseSpend) },
     {
-      label: `Spesa annua nel ${last.year}`,
-      value: eur(spendEnd),
-      hint: real ? 'in euro di oggi' : 'in euro correnti',
+      label: `Spesa annua a ${end}`,
+      value: eur(s.finalSpend),
+      hint: `pari a ${eur(s.finalSpendReal)} di oggi`,
     },
     {
-      label: 'Risparmio annuo oggi',
-      value: eur(savingNow),
-      hint: savingNow < 0 ? 'stai spendendo più di quanto incassi' : undefined,
+      label: 'Risparmio nei prossimi 12 mesi',
+      value: eur(s.savingsFirstYear),
+      hint:
+        s.savingsFirstYear < 0 ? 'stai spendendo più di quanto incassi' : undefined,
     },
     {
-      label: `Patrimonio nel ${last.year}`,
-      value: eur(wealth),
-      hint: real ? 'in euro di oggi' : 'in euro correnti',
+      label: `Patrimonio a ${end}`,
+      value: eur(s.finalWealth),
+      hint: `pari a ${eur(s.finalWealthReal)} di oggi`,
     },
   ];
 

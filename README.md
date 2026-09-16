@@ -17,13 +17,21 @@ browser e nessuna configurazione lascia il dispositivo.
 - **Configurazione** di affitto (contratto, imposte di registro e bollo,
   cedolare secca, condominio), utenze e spese, con selettore fra tutti i 7.904
   comuni italiani.
+- **Spese non mensili**: bollette ogni 2, 3 o 6 mesi, premi annuali in un mese
+  fisso, pagamenti a rate e spese una tantum future, ciascuna nel mese in cui
+  la paghi.
 - **Coabitazione**: ripartizione del canone fra coinquilini in base alla
   metratura della camera e agli spazi comuni, con camera doppia e imposte a
   carico del solo intestatario.
 - **Previsione** da un anno e mezzo a 30 anni per categoria, con bande di
-  incertezza e valori sia in euro correnti sia in euro di oggi.
-- **Patrimonio**: quanto ti resta anno per anno, con la soglia dello zero e
-  l'anno in cui i risparmi si esaurirebbero, anche nello scenario peggiore.
+  incertezza. Gli importi sono in euro correnti, con accanto il loro valore in
+  euro di oggi: l'inflazione si vede, invece di stare dietro un interruttore.
+- **Mese per mese**: entrate e uscite con una barra per mese e una linea per
+  ogni mese fino a tre anni, una linea ogni sei mesi sugli orizzonti lunghi.
+- **Anno per anno**: uno slider per mettere un anno futuro accanto al primo —
+  reddito, spese, avanzo, patrimonio e il prezzo di ogni singola voce.
+- **Patrimonio**: quanto ti resta mese per mese, con la soglia dello zero e
+  il mese in cui i risparmi si esaurirebbero, anche nello scenario peggiore.
 - **Spiegazione** di ogni categoria: quanta parte dell'aumento viene
   dall'inflazione generale, quanta dal differenziale della categoria, quanta
   dal rientro dalla situazione attuale, quanta dalle regole del contratto.
@@ -132,10 +140,36 @@ imputerebbe una spesa annua intera a un anno di cui restano tre mesi, e
 falserebbe soprattutto il patrimonio, che parte da oggi.
 
 L'orizzonte può essere frazionario: a un anno e mezzo l'ultimo periodo copre
-sei mesi e costa in proporzione, invece di arrotondare a due anni interi. Gli
-importi vengono annualizzati prima di calcolare i tassi di crescita, altrimenti
-confrontare un periodo pieno con uno dimezzato darebbe una crescita
-fittiziamente negativa.
+sei mesi, invece di arrotondare a due anni interi. I tassi di crescita
+confrontano i primi e gli ultimi dodici mesi, altrimenti un periodo pieno
+messo accanto a uno dimezzato darebbe una crescita fittiziamente negativa.
+
+### Ogni uscita nel suo mese
+
+I periodi di dodici mesi restano l'unità in cui vivono le regole: la stima
+dell'inflazione è annuale, e lo sono gli scatti ISTAT e l'imposta di registro.
+Dentro ogni periodo la proiezione è però scomposta **mese per mese**, e la somma
+dei mesi coincide esattamente con il totale del periodo (è verificato da un
+test):
+
+- le voci mensili costano ogni mese l'importo rivalutato al livello dei prezzi
+  del periodo: i prezzi si aggiornano ogni dodici mesi, e le uscite salgono a
+  gradini;
+- le voci **ricorrenti non mensili** pesano tutte sul mese dell'addebito;
+  un periodo parziale che non contiene quel mese non le conta, invece di
+  imputarne una frazione;
+- le **rate** sono un importo fisso concordato: non seguono l'inflazione e non
+  hanno banda di incertezza;
+- le spese **una tantum** future sono espresse ai prezzi di oggi e rivalutate
+  con la loro categoria fino alla data;
+- canone e condominio si pagano ogni mese, le imposte del contratto alla
+  ricorrenza annuale;
+- la **tredicesima** arriva a dicembre e la **quattordicesima** a luglio, e il
+  rendimento dei risparmi si capitalizza mese per mese.
+
+Il risultato è un patrimonio che può andare sotto zero a marzo, quando arriva
+l'assicurazione, e tornare sopra a dicembre: un mese in rosso che un conto
+annuale non vedrebbe.
 
 ### Le incertezze non si sommano
 
@@ -226,7 +260,7 @@ npm run dev            # http://localhost:5173/carovita/
 Altri comandi:
 
 ```bash
-npm test          # 88 test: invarianti di dominio + integrazione sui dati veri
+npm test          # 110 test: invarianti di dominio + integrazione sui dati veri
 npm run typecheck
 npm run backtest  # rigenera docs/BACKTEST.md
 npm run build
@@ -241,7 +275,8 @@ src/core/      motore di calcolo, puro: niente rete, filesystem o DOM
   series.ts    utilità sulle serie storiche
   model.ts     stima e previsione dell'inflazione per categoria
   rent.ts      regole contrattuali degli affitti e imposte
-  project.ts   da (profilo + dati) a previsione con attribuzione
+  schedule.ts  calendario degli addebiti: cadenze, rate, spese una tantum
+  project.ts   da (profilo + dati) a previsione mensile con attribuzione
   backtest.ts  validazione walk-forward fuori campione
 src/ui/        interfaccia React
 scripts/       pipeline dati, eseguita in CI

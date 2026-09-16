@@ -2,16 +2,19 @@
  * Confronto fra profili.
  *
  * È il punto in cui l'applicazione risponde alla domanda che conta: fra due
- * modi di vivere, quale costa meno nell'arco di quindici anni, e di quanto?
- * Le differenze si leggono meglio in euro costanti, perché l'inflazione
- * gonfia allo stesso modo tutti gli scenari e nasconde lo scarto reale.
+ * modi di vivere, quale costa meno nell'arco dell'orizzonte, e di quanto?
+ * Gli importi sono in euro correnti, con accanto il loro valore in euro di
+ * oggi: l'inflazione gonfia allo stesso modo tutti gli scenari, e vederla
+ * separata aiuta a leggere lo scarto reale.
  */
 
 import { useMemo } from 'react';
 import {
   CartesianGrid,
+  ComposedChart,
   Line,
-  LineChart,
+  ReferenceArea,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -21,53 +24,82 @@ import {
 import { summarize } from '../core/project.js';
 import { shortMonthLabel } from '../core/series.js';
 import type { ProjectionResult } from '../core/types.js';
+import {
+  TooltipBox,
+  YearSlider,
+  moneyAxisProps,
+  timeAxisProps,
+  timeGridProps,
+} from './charts.js';
 import { eur, eurSigned, pct, pctSigned } from './format.js';
+import {
+  buildTimeline,
+  flowBuckets,
+  periodAt,
+  periodSpan,
+} from './timeline.js';
 
 interface Props {
   results: ProjectionResult[];
   colors: string[];
-  real: boolean;
+  selected: number;
+  onSelect: (h: number) => void;
 }
 
-export function Compare({ results, colors, real }: Props): JSX.Element {
+export function Compare({ results, colors, selected, onSelect }: Props): JSX.Element {
   const summaries = useMemo(() => results.map(summarize), [results]);
+  const first = results[0];
 
-  const chartData = useMemo(() => {
-    const years = results[0]?.years.map((y) => y.label) ?? [];
-    return years.map((year, i) => {
-      const row: Record<string, number | string> = { anno: year };
-      results.forEach((r, ri) => {
-        const y = r.years[i];
-        // Spesa riportata all'anno: l'ultimo periodo puo' essere parziale.
-        if (y) row[`p${ri}`] = (real ? y.totalReal : y.totalNominal) / y.fraction;
+  const tl = useMemo(
+    () => (first ? buildTimeline(first.startMonth, first.months.length) : null),
+    [first],
+  );
+
+  // Tutti i profili condividono mese di partenza e orizzonte, quindi anche
+  // la stessa scansione del tempo: le righe si allineano per posizione.
+  const spendData = useMemo(() => {
+    if (!tl) return [];
+    const perProfile = results.map((r) => flowBuckets(r, tl));
+    return perProfile[0]!.map((b, bi) => {
+      const row: Record<string, number | string> = { x: b.x, label: b.label };
+      perProfile.forEach((buckets, ri) => {
+        row[`p${ri}`] = buckets[bi]?.spend ?? 0;
       });
       return row;
     });
-  }, [results, real]);
+  }, [results, first, tl]);
 
   const wealthData = useMemo(() => {
-    const years = results[0]?.years.map((y) => y.label) ?? [];
-    return years.map((year, i) => {
-      const row: Record<string, number | string> = { anno: year };
-      results.forEach((r, ri) => {
-        const y = r.years[i];
-        if (y) {
-          row[`p${ri}`] = real
-            ? y.cumulativeWealth / y.priceLevel
-            : y.cumulativeWealth;
-        }
-      });
-      return row;
+    if (!tl) return [];
+    const start: Record<string, number | string> = {
+      x: 0,
+      label: `Oggi, inizio ${shortMonthLabel(first!.startMonth)}`,
+    };
+    results.forEach((r, ri) => {
+      start[`p${ri}`] = r.initialSavings;
     });
-  }, [results, real]);
+    const rows = [start];
+    for (const fm of first!.months) {
+      const row: Record<string, number | string> = {
+        x: fm.index + 1,
+        label: `Fine ${shortMonthLabel(fm.month)}`,
+      };
+      results.forEach((r, ri) => {
+        const m = r.months[fm.index];
+        if (m) row[`p${ri}`] = m.wealth;
+      });
+      rows.push(row);
+    }
+    return rows;
+  }, [results, first, tl]);
 
-  if (results.length < 2) {
+  if (results.length < 2 || !first || !tl) {
     return (
       <div className="card">
         <h2>Confronto</h2>
         <p className="muted">
-          Aggiungi almeno un secondo profilo dalla scheda Configurazione per
-          confrontare due scenari.
+          Aggiungi almeno un secondo profilo con «Duplica per confrontare» per
+          mettere a confronto due scenari.
         </p>
       </div>
     );
@@ -79,16 +111,21 @@ export function Compare({ results, colors, real }: Props): JSX.Element {
   const best = [...summaries].sort(
     (a, b) => a.cumulativeSpend - b.cumulativeSpend,
   )[0]!;
+  const span = periodSpan(first, selected);
+  const names = summaries.map((s) => s.profileName);
+  const onClick = (state: { activeLabel?: string | number } | null) => {
+    const x = Number(state?.activeLabel);
+    if (Number.isFinite(x)) onSelect(periodAt(first, x));
+  };
 
   return (
     <>
       <div className="card">
         <h2>Quale profilo conviene</h2>
         <p className="muted small" style={{ marginTop: -4 }}>
-          Da {shortMonthLabel(results[0]!.startMonth)} a{' '}
-          {shortMonthLabel(results[0]!.endMonth)}, in{' '}
-          {real ? 'euro di oggi' : 'euro correnti'}. Il riferimento è{' '}
-          <strong>{ref.profileName}</strong>.
+          Da {shortMonthLabel(first.startMonth)} a {shortMonthLabel(first.endMonth)}.
+          Il riferimento è <strong>{ref.profileName}</strong>. Sotto ogni
+          importo futuro, il suo valore in euro di oggi.
         </p>
 
         <div className="table-wrap">
@@ -96,8 +133,8 @@ export function Compare({ results, colors, real }: Props): JSX.Element {
             <thead>
               <tr>
                 <th>Profilo</th>
-                <th>Spesa oggi</th>
-                <th>Spesa finale</th>
+                <th>Spesa nei prossimi 12 mesi</th>
+                <th>Spesa negli ultimi 12 mesi</th>
                 <th>Crescita annua</th>
                 <th>Spesa cumulata</th>
                 <th>Differenza</th>
@@ -110,32 +147,28 @@ export function Compare({ results, colors, real }: Props): JSX.Element {
                 return (
                   <tr key={s.profileId}>
                     <td>
-                      <span
-                        className="swatch"
-                        style={{ background: colors[i] }}
-                      />
+                      <span className="swatch" style={{ background: colors[i] }} />
                       {s.profileName}
-                      {s.profileId === best.profileId &&
-                        summaries.length > 1 && (
-                          <span
-                            className="small"
-                            style={{ color: 'var(--good)', marginLeft: 6 }}
-                          >
-                            più economico
-                          </span>
-                        )}
+                      {s.profileId === best.profileId && (
+                        <span
+                          className="small"
+                          style={{ color: 'var(--good)', marginLeft: 6 }}
+                        >
+                          più economico
+                        </span>
+                      )}
                     </td>
                     <td className="num">{eur(s.baseSpend)}</td>
                     <td className="num">
-                      {eur(real ? s.finalSpendReal : s.finalSpend)}
+                      {eur(s.finalSpend)}
+                      <div className="muted small">{eur(s.finalSpendReal)} di oggi</div>
                     </td>
                     <td className="num">{pct(s.cagr)}</td>
                     <td className="num">{eur(s.cumulativeSpend)}</td>
+                    <td className="num">{i === 0 ? '—' : eurSigned(diff)}</td>
                     <td className="num">
-                      {i === 0 ? '—' : eurSigned(diff)}
-                    </td>
-                    <td className="num">
-                      {eur(real ? s.finalWealthReal : s.finalWealth)}
+                      {eur(s.finalWealth)}
+                      <div className="muted small">{eur(s.finalWealthReal)} di oggi</div>
                     </td>
                   </tr>
                 );
@@ -144,72 +177,114 @@ export function Compare({ results, colors, real }: Props): JSX.Element {
           </table>
         </div>
 
-        {summaries.length > 1 && (
-          <p className="hint">
-            Scegliere <strong>{best.profileName}</strong> invece di{' '}
-            <strong>{ref.profileName}</strong> cambia la spesa complessiva di{' '}
-            <strong>
-              {eurSigned(best.cumulativeSpend - ref.cumulativeSpend)}
-            </strong>{' '}
-            sull’intero orizzonte, pari a{' '}
-            {pctSigned(
-              ref.cumulativeSpend > 0
-                ? best.cumulativeSpend / ref.cumulativeSpend - 1
-                : 0,
-            )}
-            .
-          </p>
-        )}
+        <p className="hint">
+          Scegliere <strong>{best.profileName}</strong> invece di{' '}
+          <strong>{ref.profileName}</strong> cambia la spesa complessiva di{' '}
+          <strong>{eurSigned(best.cumulativeSpend - ref.cumulativeSpend)}</strong>{' '}
+          sull’intero orizzonte, pari a{' '}
+          {pctSigned(
+            ref.cumulativeSpend > 0
+              ? best.cumulativeSpend / ref.cumulativeSpend - 1
+              : 0,
+          )}
+          .
+        </p>
       </div>
 
       <div className="card">
-        <h2>Spesa annua a confronto</h2>
-        <div className="legend">
-          {summaries.map((s, i) => (
-            <span key={s.profileId}>
-              <span className="swatch" style={{ background: colors[i] }} />
-              {s.profileName}
-            </span>
-          ))}
+        <h2>Anno per anno</h2>
+        <p className="muted small" style={{ marginTop: -4 }}>
+          I profili nello stesso anno, fianco a fianco.
+        </p>
+        <YearSlider
+          id="c-year"
+          years={first.years}
+          selected={selected}
+          onSelect={onSelect}
+        />
+        <div className="table-wrap" style={{ marginTop: 12 }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Profilo</th>
+                <th>Reddito netto</th>
+                <th>Spese</th>
+                <th>Avanzo</th>
+                <th>Patrimonio a fine periodo</th>
+                <th>Differenza di patrimonio</th>
+              </tr>
+            </thead>
+            <tbody>
+              {results.map((r, i) => {
+                const y = r.years[selected];
+                if (!y) return null;
+                const k = y.priceLevel;
+                const refWealth = results[0]!.years[selected]!.cumulativeWealth;
+                return (
+                  <tr key={r.profileId}>
+                    <td>
+                      <span className="swatch" style={{ background: colors[i] }} />
+                      {r.profileName}
+                    </td>
+                    {[y.incomeNominal, y.totalNominal, y.savingsNominal, y.cumulativeWealth].map(
+                      (v, j) => (
+                        <td className="num" key={j}>
+                          {eur(v)}
+                          <div className="muted small">{eur(v / k)} di oggi</div>
+                        </td>
+                      ),
+                    )}
+                    <td className="num">
+                      {i === 0 ? '—' : eurSigned(y.cumulativeWealth - refWealth)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
+      </div>
+
+      <div className="card">
+        <h2>Spesa a confronto</h2>
+        <p className="muted small" style={{ marginTop: -4 }}>
+          {tl.bucket === 1
+            ? 'Uscite di ogni mese, in euro correnti.'
+            : 'Uscite medie al mese di ciascun anno, in euro correnti.'}
+        </p>
+        <Legend names={names} colors={colors} />
         <div className="chart-box">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart
-              data={chartData}
+            <ComposedChart
+              data={spendData}
               margin={{ top: 8, right: 16, bottom: 4, left: 8 }}
+              onClick={onClick}
             >
-              <CartesianGrid
-                stroke="var(--border)"
-                strokeDasharray="2 4"
-                vertical={false}
+              <CartesianGrid {...timeGridProps(tl)} />
+              <XAxis {...timeAxisProps(tl)} />
+              <YAxis {...moneyAxisProps} />
+              <Tooltip content={<CompareTooltip names={names} colors={colors} />} />
+              <ReferenceArea
+                x1={span.x1}
+                x2={span.x2}
+                fill="var(--series-1)"
+                fillOpacity={0.07}
+                stroke="none"
               />
-              <XAxis
-                dataKey="anno"
-                stroke="var(--text-muted)"
-                tick={{ fontSize: 12 }}
-                tickLine={false}
-              />
-              <YAxis
-                stroke="var(--text-muted)"
-                tick={{ fontSize: 12 }}
-                tickLine={false}
-                axisLine={false}
-                width={72}
-                tickFormatter={(v: number) => eur(v)}
-              />
-              <Tooltip content={<CompareTooltip names={summaries.map((s) => s.profileName)} />} />
+              {tl.yearStarts.map((x) => (
+                <ReferenceLine key={x} x={x} stroke="var(--border-strong)" />
+              ))}
               {summaries.map((s, i) => (
                 <Line
                   key={s.profileId}
                   dataKey={`p${i}`}
-                  name={s.profileName}
                   stroke={colors[i]}
                   strokeWidth={2}
                   dot={false}
                   isAnimationActive={false}
                 />
               ))}
-            </LineChart>
+            </ComposedChart>
           </ResponsiveContainer>
         </div>
       </div>
@@ -220,52 +295,40 @@ export function Compare({ results, colors, real }: Props): JSX.Element {
           Risparmi cumulati, dato il reddito e il rendimento impostati. Sotto lo
           zero il profilo consuma più di quanto incassa.
         </p>
-        <div className="legend">
-          {summaries.map((s, i) => (
-            <span key={s.profileId}>
-              <span className="swatch" style={{ background: colors[i] }} />
-              {s.profileName}
-            </span>
-          ))}
-        </div>
+        <Legend names={names} colors={colors} />
         <div className="chart-box">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart
+            <ComposedChart
               data={wealthData}
               margin={{ top: 8, right: 16, bottom: 4, left: 8 }}
+              onClick={onClick}
             >
-              <CartesianGrid
-                stroke="var(--border)"
-                strokeDasharray="2 4"
-                vertical={false}
+              <CartesianGrid {...timeGridProps(tl)} />
+              <XAxis {...timeAxisProps(tl)} />
+              <YAxis {...moneyAxisProps} />
+              <Tooltip content={<CompareTooltip names={names} colors={colors} />} />
+              <ReferenceArea
+                x1={span.x1}
+                x2={span.x2}
+                fill="var(--series-1)"
+                fillOpacity={0.07}
+                stroke="none"
               />
-              <XAxis
-                dataKey="anno"
-                stroke="var(--text-muted)"
-                tick={{ fontSize: 12 }}
-                tickLine={false}
-              />
-              <YAxis
-                stroke="var(--text-muted)"
-                tick={{ fontSize: 12 }}
-                tickLine={false}
-                axisLine={false}
-                width={78}
-                tickFormatter={(v: number) => eur(v)}
-              />
-              <Tooltip content={<CompareTooltip names={summaries.map((s) => s.profileName)} />} />
+              {tl.yearStarts.map((x) => (
+                <ReferenceLine key={x} x={x} stroke="var(--border-strong)" />
+              ))}
+              <ReferenceLine y={0} stroke="var(--critical)" strokeWidth={1.5} />
               {summaries.map((s, i) => (
                 <Line
                   key={s.profileId}
                   dataKey={`p${i}`}
-                  name={s.profileName}
                   stroke={colors[i]}
                   strokeWidth={2}
                   dot={false}
                   isAnimationActive={false}
                 />
               ))}
-            </LineChart>
+            </ComposedChart>
           </ResponsiveContainer>
         </div>
       </div>
@@ -273,30 +336,40 @@ export function Compare({ results, colors, real }: Props): JSX.Element {
   );
 }
 
-interface TooltipProps {
-  active?: boolean;
-  label?: string | number;
-  payload?: { name?: string; value?: number; color?: string }[];
-  names: string[];
-}
-
-function CompareTooltip({ active, label, payload }: TooltipProps): JSX.Element {
-  if (!active || !payload || payload.length === 0) return <></>;
+function Legend({ names, colors }: { names: string[]; colors: string[] }): JSX.Element {
   return (
-    <div className="tooltip">
-      <div style={{ fontWeight: 600, marginBottom: 4 }}>{label}</div>
-      {payload.map((p, i) => (
-        <div className="t-row" key={i}>
-          <span>
-            <span
-              className="swatch"
-              style={{ background: p.color ?? 'var(--text-muted)' }}
-            />
-            {p.name}
-          </span>
-          <strong>{eur(p.value ?? 0)}</strong>
-        </div>
+    <div className="legend">
+      {names.map((n, i) => (
+        <span key={i}>
+          <span className="swatch" style={{ background: colors[i] }} />
+          {n}
+        </span>
       ))}
     </div>
+  );
+}
+
+function CompareTooltip({
+  active,
+  payload,
+  names,
+  colors,
+}: {
+  active?: boolean;
+  payload?: { payload: Record<string, number | string> }[];
+  names: string[];
+  colors: string[];
+}): JSX.Element {
+  const row = active ? payload?.[0]?.payload : undefined;
+  if (!row) return <></>;
+  return (
+    <TooltipBox
+      title={String(row.label)}
+      rows={names.map((name, i) => ({
+        name,
+        value: Number(row[`p${i}`] ?? 0),
+        color: colors[i],
+      }))}
+    />
   );
 }

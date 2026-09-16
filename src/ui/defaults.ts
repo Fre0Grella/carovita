@@ -6,7 +6,13 @@
  * mostri qualcosa di sensato al primo avvio, e vanno sostituiti con i propri.
  */
 
-import type { CategoryId, ExpenseItem, Profile } from '../core/types.js';
+import { MONTHLY } from '../core/schedule.js';
+import type {
+  CategoryId,
+  ExpenseItem,
+  ExpenseSchedule,
+  Profile,
+} from '../core/types.js';
 
 /** Colori dei profili: slot categoriali 1-3, validati per daltonismo. */
 export const PROFILE_COLORS = [
@@ -59,9 +65,10 @@ function item(
   id: string,
   label: string,
   category: CategoryId,
-  monthlyAmount: number,
+  amount: number,
+  schedule: ExpenseSchedule = MONTHLY,
 ): ExpenseItem {
-  return { id, label, category, monthlyAmount, growthOverride: null };
+  return { id, label, category, amount, schedule, growthOverride: null };
 }
 
 export function makeDefaultProfile(index = 0): Profile {
@@ -91,7 +98,13 @@ export function makeDefaultProfile(index = 0): Profile {
       item('e-spesa', 'Spesa alimentare', 'food', 300),
       item('e-fuori', 'Ristoranti e bar', 'restaurants', 120),
       item('e-trasporti', 'Trasporto pubblico', 'transport_public', 40),
-      item('e-auto', 'Carburante e auto', 'transport_fuel', 90),
+      item('e-auto', 'Carburante e auto', 'transport_fuel', 60),
+      // Un esempio di spesa non mensile: l'RC auto si paga una volta l'anno.
+      item('e-rca', 'Assicurazione auto', 'insurance', 380, {
+        kind: 'recurring',
+        everyMonths: 12,
+        month: 3,
+      }),
       item('e-tempo', 'Tempo libero', 'recreation', 80),
       item('e-salute', 'Salute', 'health', 40),
       item('e-varie', 'Altre spese', 'misc', 90),
@@ -137,9 +150,16 @@ export function loadState(): StoredState | null {
       // override esplicito del tasso di crescita: i vecchi valori non hanno
       // un equivalente diretto, quindi si torna alla previsione del modello.
       for (const it of [...(p.utilities ?? []), ...(p.expenses ?? [])]) {
-        const legacy = it as unknown as { realGrowth?: number };
+        const legacy = it as unknown as {
+          realGrowth?: number;
+          monthlyAmount?: number;
+        };
         if (it.growthOverride === undefined) it.growthOverride = null;
         delete legacy.realGrowth;
+        // Prima delle spese non mensili ogni voce era un importo al mese.
+        if (it.amount === undefined) it.amount = legacy.monthlyAmount ?? 0;
+        if (it.schedule === undefined) it.schedule = MONTHLY;
+        delete legacy.monthlyAmount;
       }
     }
     return parsed;
