@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { deficit, surplus } from '../src/ui/format.js';
 import { buildTimeline, tickLabel } from '../src/ui/timeline.js';
 
 describe('asse del tempo', () => {
@@ -35,5 +36,23 @@ describe('asse del tempo', () => {
       expect(tl.labelled.size).toBeLessThanOrEqual(8);
       expect(tl.labelled.size).toBeGreaterThanOrEqual(3);
     }
+  });
+});
+
+describe('avanzo e disavanzo', () => {
+  it('un saldo positivo e’ un avanzo, e non c’e’ disavanzo', () => {
+    expect(surplus(600)).toBe(600);
+    expect(deficit(600)).toBeNull();
+  });
+
+  it('un saldo negativo e’ un disavanzo positivo, e l’avanzo sparisce', () => {
+    expect(deficit(-50)).toBe(50);
+    expect(surplus(-50)).toBeNull();
+  });
+
+  it('il pareggio si mostra come avanzo nullo, non come disavanzo', () => {
+    expect(surplus(0)).toBe(0);
+    expect(surplus(-0.3)).toBe(0);
+    expect(deficit(-0.3)).toBeNull();
   });
 });

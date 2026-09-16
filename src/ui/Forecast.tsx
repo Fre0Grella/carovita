@@ -44,7 +44,15 @@ import {
   timeAxisProps,
   timeGridProps,
 } from './charts.js';
-import { eur, eurPrecise, eurSigned, pct, pctSigned } from './format.js';
+import {
+  deficit,
+  eur,
+  eurPrecise,
+  eurSigned,
+  pct,
+  pctSigned,
+  surplus,
+} from './format.js';
 import {
   buildTimeline,
   flowBuckets,
@@ -395,17 +403,41 @@ function YearExplorer({
     return pctSigned(b / a - 1);
   };
 
-  const rows = [
+  // Avanzo e disavanzo sono due righe distinte, ciascuna con importi
+  // positivi: un «avanzo di −50 €» si legge male. Una riga compare solo se
+  // almeno uno dei due anni la riguarda, e nell'altro mostra un trattino.
+  const rows: {
+    label: string;
+    hint?: string;
+    loss?: boolean;
+    first: number | null;
+    now: number | null;
+    stock: boolean;
+  }[] = [
     { label: 'Reddito netto', first: y0.incomeNominal, now: y.incomeNominal, stock: false },
     { label: 'Spese', first: y0.totalNominal, now: y.totalNominal, stock: false },
-    { label: 'Avanzo', first: y0.savingsNominal, now: y.savingsNominal, stock: false },
+    {
+      label: 'Avanzo',
+      hint: 'quanto metti da parte',
+      first: surplus(y0.savingsNominal),
+      now: surplus(y.savingsNominal),
+      stock: false,
+    },
+    {
+      label: 'Disavanzo',
+      hint: 'quanto ti manca: lo prendi dai risparmi',
+      loss: true,
+      first: deficit(y0.savingsNominal),
+      now: deficit(y.savingsNominal),
+      stock: false,
+    },
     {
       label: 'Patrimonio a fine periodo',
       first: y0.cumulativeWealth,
       now: y.cumulativeWealth,
       stock: true,
     },
-  ];
+  ].filter((r) => r.first !== null || r.now !== null);
 
   const payFirst = y0.incomeNominal / months(y0);
   const payNow = y.incomeNominal / months(y);
@@ -463,14 +495,21 @@ function YearExplorer({
           <tbody>
             {rows.map((r) => (
               <tr key={r.label}>
-                <td>{r.label}</td>
-                <td className="num">{eur(r.first)}</td>
-                <td className="num">
-                  <strong>{eur(r.now)}</strong>
+                <td>
+                  <span style={r.loss ? { color: 'var(--critical)', fontWeight: 600 } : undefined}>
+                    {r.label}
+                  </span>
+                  {r.hint && <div className="muted small">{r.hint}</div>}
                 </td>
-                <td className="num">{eur(r.now / k)}</td>
+                <td className="num">{r.first === null ? '—' : eur(r.first)}</td>
                 <td className="num">
-                  {selected === 0 ? '—' : realChange(r.first, r.now, r.stock)}
+                  {r.now === null ? '—' : <strong>{eur(r.now)}</strong>}
+                </td>
+                <td className="num">{r.now === null ? '—' : eur(r.now / k)}</td>
+                <td className="num">
+                  {selected === 0 || r.first === null || r.now === null
+                    ? '—'
+                    : realChange(r.first, r.now, r.stock)}
                 </td>
               </tr>
             ))}
@@ -480,7 +519,7 @@ function YearExplorer({
 
       {y.fraction < 1 && (
         <p className="hint">
-          L’ultimo periodo dura {months(y)} mesi: reddito, spese e avanzo
+          L’ultimo periodo dura {months(y)} mesi: reddito, spese e saldo
           coprono solo quei mesi. Il confronto nell’ultima colonna usa la media
           mensile.
         </p>
@@ -871,13 +910,16 @@ function FlowTooltip({
   const row = active ? payload?.[0]?.payload : undefined;
   if (!row) return <></>;
   const suffix = monthly ? '' : ', media al mese';
+  const balance = row.reddito - row.spesa;
   return (
     <TooltipBox
       title={row.label}
       rows={[
         { name: `Uscite${suffix}`, value: row.spesa, color: 'var(--series-1)' },
         { name: `Entrate${suffix}`, value: row.reddito, color: 'var(--series-3)' },
-        { name: 'Avanzo', value: row.reddito - row.spesa },
+        deficit(balance) === null
+          ? { name: 'Avanzo', value: surplus(balance) ?? 0 }
+          : { name: 'Disavanzo', value: deficit(balance)!, color: 'var(--critical)' },
       ]}
       notes={row.charges}
     />

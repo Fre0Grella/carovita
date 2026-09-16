@@ -31,7 +31,14 @@ import {
   timeAxisProps,
   timeGridProps,
 } from './charts.js';
-import { eur, eurSigned, pct, pctSigned } from './format.js';
+import {
+  deficit,
+  eur,
+  eurSigned,
+  pct,
+  pctSigned,
+  surplus,
+} from './format.js';
 import {
   buildTimeline,
   flowBuckets,
@@ -113,6 +120,11 @@ export function Compare({ results, colors, selected, onSelect }: Props): JSX.Ele
   )[0]!;
   const span = periodSpan(first, selected);
   const names = summaries.map((s) => s.profileName);
+  // Avanzo e disavanzo in colonne separate, ciascuna solo se almeno un
+  // profilo ne ha uno nell'anno scelto.
+  const balances = results.map((r) => r.years[selected]?.savingsNominal ?? 0);
+  const anySurplus = balances.some((b) => surplus(b) !== null);
+  const anyDeficit = balances.some((b) => deficit(b) !== null);
   const onClick = (state: { activeLabel?: string | number } | null) => {
     const x = Number(state?.activeLabel);
     if (Number.isFinite(x)) onSelect(periodAt(first, x));
@@ -209,7 +221,10 @@ export function Compare({ results, colors, selected, onSelect }: Props): JSX.Ele
                 <th>Profilo</th>
                 <th>Reddito netto</th>
                 <th>Spese</th>
-                <th>Avanzo</th>
+                {anySurplus && <th>Avanzo</th>}
+                {anyDeficit && (
+                  <th style={{ color: 'var(--critical)' }}>Disavanzo</th>
+                )}
                 <th>Patrimonio a fine periodo</th>
                 <th>Differenza di patrimonio</th>
               </tr>
@@ -226,14 +241,24 @@ export function Compare({ results, colors, selected, onSelect }: Props): JSX.Ele
                       <span className="swatch" style={{ background: colors[i] }} />
                       {r.profileName}
                     </td>
-                    {[y.incomeNominal, y.totalNominal, y.savingsNominal, y.cumulativeWealth].map(
-                      (v, j) => (
-                        <td className="num" key={j}>
-                          {eur(v)}
-                          <div className="muted small">{eur(v / k)} di oggi</div>
-                        </td>
-                      ),
-                    )}
+                    {[
+                      y.incomeNominal,
+                      y.totalNominal,
+                      ...(anySurplus ? [surplus(y.savingsNominal)] : []),
+                      ...(anyDeficit ? [deficit(y.savingsNominal)] : []),
+                      y.cumulativeWealth,
+                    ].map((v, j) => (
+                      <td className="num" key={j}>
+                        {v === null ? (
+                          '—'
+                        ) : (
+                          <>
+                            {eur(v)}
+                            <div className="muted small">{eur(v / k)} di oggi</div>
+                          </>
+                        )}
+                      </td>
+                    ))}
                     <td className="num">
                       {i === 0 ? '—' : eurSigned(y.cumulativeWealth - refWealth)}
                     </td>

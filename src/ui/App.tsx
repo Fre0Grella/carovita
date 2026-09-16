@@ -33,7 +33,7 @@ import {
   saveState,
 } from './defaults.js';
 import { shortMonthLabel } from '../core/series.js';
-import { eur, isoDate, pct } from './format.js';
+import { deficit, eur, isoDate, pct } from './format.js';
 
 type Tab = 'config' | 'previsione' | 'confronto' | 'dati';
 
@@ -357,19 +357,28 @@ function Summary({ result }: { result: ProjectionResult }): JSX.Element {
   // Gli importi futuri sono in euro correnti, cioe' quelli che vedrai sul
   // conto; il loro valore in euro di oggi sta sotto, invece che dietro un
   // interruttore che cambia tutti i numeri.
-  const cells = [
+  const loss = deficit(s.savingsFirstYear);
+  const cells: { label: string; value: string; hint?: string; loss?: boolean }[] = [
     { label: 'Spesa nei prossimi 12 mesi', value: eur(s.baseSpend) },
     {
       label: `Spesa annua a ${end}`,
       value: eur(s.finalSpend),
       hint: `pari a ${eur(s.finalSpendReal)} di oggi`,
     },
-    {
-      label: 'Risparmio nei prossimi 12 mesi',
-      value: eur(s.savingsFirstYear),
-      hint:
-        s.savingsFirstYear < 0 ? 'stai spendendo più di quanto incassi' : undefined,
-    },
+    // Un saldo negativo non e' un «avanzo di −50 €»: diventa un disavanzo,
+    // mostrato in positivo e in rosso, e la voce avanzo sparisce.
+    loss === null
+      ? {
+          label: 'Avanzo nei prossimi 12 mesi',
+          value: eur(Math.max(0, s.savingsFirstYear)),
+          hint: 'quanto metti da parte',
+        }
+      : {
+          label: 'Disavanzo nei prossimi 12 mesi',
+          value: eur(loss),
+          hint: 'spendi più di quanto incassi: lo prendi dai risparmi',
+          loss: true,
+        },
     {
       label: `Patrimonio a ${end}`,
       value: eur(s.finalWealth),
@@ -382,12 +391,18 @@ function Summary({ result }: { result: ProjectionResult }): JSX.Element {
       <div className="grid">
         {cells.map((c) => (
           <div key={c.label}>
-            <div className="small muted">{c.label}</div>
+            <div
+              className="small"
+              style={{ color: c.loss ? 'var(--critical)' : 'var(--text-muted)' }}
+            >
+              {c.label}
+            </div>
             <div
               style={{
                 fontSize: 22,
                 fontWeight: 600,
                 fontVariantNumeric: 'tabular-nums',
+                color: c.loss ? 'var(--critical)' : undefined,
               }}
             >
               {c.value}

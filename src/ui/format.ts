@@ -65,3 +65,18 @@ export function isoDate(iso: string): string {
     year: 'numeric',
   });
 }
+
+/**
+ * Avanzo e disavanzo come importi distinti e sempre positivi.
+ *
+ * Un saldo negativo non si mostra come «avanzo di −50 €»: diventa un
+ * disavanzo di 50 €, e l'avanzo sparisce. Sotto il mezzo euro il saldo conta
+ * come pareggio, che si mostra come avanzo nullo.
+ */
+export function surplus(balance: number): number | null {
+  return balance >= -0.5 ? Math.max(0, balance) : null;
+}
+
+export function deficit(balance: number): number | null {
+  return balance < -0.5 ? -balance : null;
+}
