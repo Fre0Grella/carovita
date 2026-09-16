@@ -76,27 +76,6 @@ export function tickLabel(tl: Timeline, x: number): string {
     : MESI[m - 1]!;
 }
 
-/** Etichetta estesa di un intervallo di mesi, per i suggerimenti. */
-export function rangeLabel(months: MonthProjection[]): string {
-  const a = months[0]!;
-  const b = months[months.length - 1]!;
-  return a === b
-    ? shortMonthLabel(a.month)
-    : `${shortMonthLabel(a.month)} - ${shortMonthLabel(b.month)}`;
-}
-
-/** Raggruppa i mesi secondo la risoluzione della timeline. */
-export function bucketsOf(
-  months: MonthProjection[],
-  tl: Timeline,
-): { start: number; months: MonthProjection[] }[] {
-  const out: { start: number; months: MonthProjection[] }[] = [];
-  for (let s = 0; s < months.length; s += tl.bucket) {
-    out.push({ start: s, months: months.slice(s, s + tl.bucket) });
-  }
-  return out;
-}
-
 /** Periodo annuale che contiene la posizione `x` dell'asse. */
 export function periodAt(result: ProjectionResult, x: number): number {
   const i = Math.min(
@@ -119,11 +98,15 @@ export function periodSpan(
 /**
  * Entrate e uscite medie al mese per ogni barra del grafico dei flussi.
  *
- * Nella vista mensile ogni barra è il suo mese. Nella vista lunga la barra
- * copre sei mesi ma mostra la media mensile dell'intero periodo annuale che
- * la contiene: la tredicesima cade in un semestre e non nell'altro, e la
- * media per semestre disegnerebbe un zig-zag che non dice nulla sulla
- * tendenza, che è ciò che si guarda su tanti anni.
+ * Nella vista mensile ogni barra è il suo mese. Nella vista lunga ogni barra
+ * è un periodo annuale, con la sua media mensile, e le linee della griglia
+ * restano ogni sei mesi. Una barra per semestre disegnerebbe un zig-zag,
+ * perché la tredicesima cade in un semestre e non nell'altro, e non direbbe
+ * nulla sulla tendenza, che è ciò che si guarda su tanti anni.
+ *
+ * La barra di un periodo è centrata come se il periodo durasse dodici mesi,
+ * così tutte hanno la stessa larghezza; quella di un ultimo periodo più corto
+ * viene tagliata al bordo del grafico e ne mostra la durata vera.
  */
 export function flowBuckets(
   result: ProjectionResult,
@@ -133,7 +116,7 @@ export function flowBuckets(
   label: string;
   spend: number;
   income: number;
-  charges: { label: string; amount: number }[];
+  charges: MonthProjection['charges'];
 }[] {
   const byPeriod = new Map<number, { spend: number; income: number; n: number }>();
   for (const m of result.months) {
@@ -144,25 +127,37 @@ export function flowBuckets(
     byPeriod.set(m.period, acc);
   }
 
-  return bucketsOf(result.months, tl).map((b) => {
-    const n = b.months.length;
-    if (tl.bucket === 1) {
-      const m = b.months[0]!;
+  if (tl.bucket === 1) {
+    return result.months.map((m) => ({
+      x: m.index + 0.5,
+      label: shortMonthLabel(m.month),
+      spend: m.spend,
+      income: m.income,
+      charges: m.charges,
+    }));
+  }
+
+  return result.years.map((y, h) => {
+    const first = result.months.find((m) => m.period === h)!;
+    const p = byPeriod.get(h)!;
+    if (p.n >= 12 || result.months.length < 12) {
       return {
-        x: b.start + 0.5,
-        label: shortMonthLabel(m.month),
-        spend: m.spend,
-        income: m.income,
-        charges: m.charges,
+        x: first.index + 6,
+        label: y.labelLong,
+        spend: p.spend / p.n,
+        income: p.income / p.n,
+        charges: [],
       };
     }
-    const period = b.months[0]!.period;
-    const p = byPeriod.get(period)!;
+    // Un ultimo periodo di sei mesi può contenere la tredicesima o
+    // saltarla, e la sua media farebbe un gradino che non esiste: si usano
+    // gli ultimi dodici mesi, come per tutte le altre barre.
+    const tail = result.months.slice(-12);
     return {
-      x: b.start + n / 2,
-      label: result.years[period]?.labelLong ?? rangeLabel(b.months),
-      spend: p.spend / p.n,
-      income: p.income / p.n,
+      x: first.index + 6,
+      label: `${shortMonthLabel(tail[0]!.month)} - ${shortMonthLabel(tail[11]!.month)} (ultimi 12 mesi)`,
+      spend: tail.reduce((a, m) => a + m.spend, 0) / 12,
+      income: tail.reduce((a, m) => a + m.income, 0) / 12,
       charges: [],
     };
   });

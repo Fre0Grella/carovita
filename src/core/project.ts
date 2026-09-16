@@ -264,7 +264,7 @@ export function project(
     // mensili da mostrare nel dettaglio del mese.
     const entries: { nominal: number; lo: number; hi: number }[][] =
       Array.from({ length: period.months }, () => []);
-    const charges: { label: string; amount: number }[][] = Array.from(
+    const charges: MonthProjection['charges'][] = Array.from(
       { length: period.months },
       () => [],
     );
@@ -443,6 +443,7 @@ export function project(
         charges[k]!.unshift({
           label: cal === 12 ? 'Tredicesima' : 'Quattordicesima',
           amount: pay * extra,
+          income: true,
         });
       }
 

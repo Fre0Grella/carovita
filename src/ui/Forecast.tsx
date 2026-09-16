@@ -791,7 +791,7 @@ function CashFlowCard({ result, tl, selected, onSelect }: ChartProps): JSX.Eleme
       <p className="muted small" style={{ marginTop: -4 }}>
         {monthly
           ? 'Ogni barra è quanto esce in quel mese. '
-          : 'Media al mese di ciascun anno, con una linea ogni sei mesi: su tanti anni i singoli mesi non si leggerebbero. '}
+          : 'Ogni barra è un anno, con la sua media al mese, e le linee cadono ogni sei mesi: su tanti anni i singoli mesi non si leggerebbero. '}
         Nei prossimi dodici mesi spendi <strong>{eur(sum.baseSpend)}</strong>,
         negli ultimi dodici <strong>{eur(sum.finalSpend)}</strong>
         {sum.cagr !== 0 && <> ({pctSigned(sum.cagr)} all’anno)</>}.
@@ -866,7 +866,7 @@ function FlowTooltip({
   label: string;
   spesa: number;
   reddito: number;
-  charges: { label: string; amount: number }[];
+  charges: { label: string; amount: number; income?: boolean }[];
 }> & { monthly: boolean }): JSX.Element {
   const row = active ? payload?.[0]?.payload : undefined;
   if (!row) return <></>;

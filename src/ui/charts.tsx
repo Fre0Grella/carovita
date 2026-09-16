@@ -8,7 +8,7 @@
  */
 
 import type { YearProjection } from '../core/types.js';
-import { eur } from './format.js';
+import { eur, eurSigned } from './format.js';
 import { tickLabel, type Timeline } from './timeline.js';
 
 /** Proprietà dell'asse orizzontale in mesi, con una tacca per ogni linea. */
@@ -21,6 +21,9 @@ export function timeAxisProps(tl: Timeline) {
     interval: 0 as const,
     tickFormatter: (v: number) => tickLabel(tl, v),
     tickSize: 4,
+    // Taglia al bordo del grafico la barra dell'ultimo periodo quando dura
+    // meno di un anno.
+    allowDataOverflow: true,
     stroke: 'var(--text-muted)',
     tick: { fontSize: 11 },
     allowDecimals: false,
@@ -125,7 +128,7 @@ export function TooltipBox({
 }: {
   title: string;
   rows: TooltipRow[];
-  notes?: { label: string; amount: number }[];
+  notes?: { label: string; amount: number; income?: boolean }[];
 }): JSX.Element {
   return (
     <div className="tooltip">
@@ -156,7 +159,7 @@ export function TooltipBox({
           {notes.map((n, i) => (
             <div className="t-row muted" key={i}>
               <span>{n.label}</span>
-              <span>{eur(n.amount)}</span>
+              <span>{eurSigned(n.income ? n.amount : -n.amount)}</span>
             </div>
           ))}
         </div>

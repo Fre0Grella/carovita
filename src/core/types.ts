@@ -475,10 +475,11 @@ export interface MonthProjection {
   wealthLo: number;
   wealthHi: number;
   /**
-   * Addebiti non mensili del mese (spese annuali, rate, una tantum, imposte
-   * del contratto): spiegano i picchi del grafico.
+   * Movimenti non mensili del mese: spese annuali, rate, una tantum e imposte
+   * del contratto in uscita, tredicesima e quattordicesima in entrata (con
+   * `income` vero). Spiegano i picchi del grafico.
    */
-  charges: { label: string; amount: number }[];
+  charges: { label: string; amount: number; income?: boolean }[];
 }
 
 export interface ProjectionResult {
