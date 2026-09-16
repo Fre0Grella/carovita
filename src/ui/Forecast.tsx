@@ -48,9 +48,14 @@ interface Props {
 export function Forecast({ result, real }: Props): JSX.Element {
   const [openCategory, setOpenCategory] = useState<string | null>(null);
 
-  /** Importo dell'anno nella scala scelta (nominale o in euro costanti). */
+  /**
+   * Importo annuo nella scala scelta (nominale o in euro costanti).
+   *
+   * L'ultimo periodo puo' coprire solo sei mesi: i flussi vanno riportati
+   * all'anno, altrimenti la spesa sembrerebbe dimezzarsi alla fine.
+   */
   const amount = (y: (typeof result.years)[number]): number =>
-    real ? y.totalReal : y.totalNominal;
+    (real ? y.totalReal : y.totalNominal) / y.fraction;
   const first = result.years[0]!;
   const last = result.years[result.years.length - 1]!;
 
@@ -74,14 +79,17 @@ export function Forecast({ result, real }: Props): JSX.Element {
     () =>
       result.years.map((y) => ({
         anno: y.label,
-        spesa: real ? y.totalReal : y.totalNominal,
+        spesa: (real ? y.totalReal : y.totalNominal) / y.fraction,
         // L'area della banda si disegna come [base, altezza]: Recharts
         // impila il secondo valore sul primo.
-        bandaBase: real ? y.totalLo / y.priceLevel : y.totalLo,
-        bandaAlt: real
-          ? (y.totalHi - y.totalLo) / y.priceLevel
-          : y.totalHi - y.totalLo,
-        reddito: real ? y.incomeNominal / y.priceLevel : y.incomeNominal,
+        bandaBase: (real ? y.totalLo / y.priceLevel : y.totalLo) / y.fraction,
+        bandaAlt:
+          (real
+            ? (y.totalHi - y.totalLo) / y.priceLevel
+            : y.totalHi - y.totalLo) / y.fraction,
+        reddito:
+          (real ? y.incomeNominal / y.priceLevel : y.incomeNominal) /
+          y.fraction,
       })),
     [result, real],
   );
@@ -338,7 +346,8 @@ export function Forecast({ result, real }: Props): JSX.Element {
                   (x) => x.label === c.label,
                 );
                 const from = base ? base.nominal : 0;
-                const delta = from > 0 ? c.nominal / from - 1 : 0;
+                const to = c.nominal / last.fraction;
+                const delta = from > 0 ? to / from - 1 : 0;
                 const isOpen = openCategory === c.label;
                 return (
                   <tr key={c.label}>
@@ -350,7 +359,7 @@ export function Forecast({ result, real }: Props): JSX.Element {
                       {c.label}
                     </td>
                     <td className="num">{eur(from)}</td>
-                    <td className="num">{eur(c.nominal)}</td>
+                    <td className="num">{eur(to)}</td>
                     <td className="num">{pctSigned(delta)}</td>
                     <td className="num">{pctSigned(c.rate)}/anno</td>
                     <td>
@@ -376,11 +385,13 @@ export function Forecast({ result, real }: Props): JSX.Element {
                   <strong>{eur(first.totalNominal)}</strong>
                 </td>
                 <td className="num">
-                  <strong>{eur(last.totalNominal)}</strong>
+                  <strong>{eur(last.totalNominal / last.fraction)}</strong>
                 </td>
                 <td className="num">
                   <strong>
-                    {pctSigned(last.totalNominal / first.totalNominal - 1)}
+                    {pctSigned(
+                      last.totalNominal / last.fraction / first.totalNominal - 1,
+                    )}
                   </strong>
                 </td>
                 <td colSpan={2} />

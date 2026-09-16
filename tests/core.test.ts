@@ -782,6 +782,22 @@ describe('override della crescita', () => {
     // Serie di test al 2% con ancora al 2%: il composto equivalente e' 2%.
     expect(food).toBeCloseTo(0.02, 4);
   });
+
+  it('forecastRatesByCategory regge gli orizzonti frazionari', () => {
+    // Regressione: con 1.5 anni leggeva path[1.5] e mandava in errore
+    // l'intera interfaccia al primo spostamento dello slider.
+    const snap = makeSnapshot();
+    for (const h of [1.5, 2.5, 3.5, 29.5]) {
+      const res = project(makeProfile(), snap, {
+        startMonth: '2026-09',
+        horizon: h,
+        anchorOverride: null,
+        confidence: 0.8,
+      });
+      const rates = forecastRatesByCategory(res.models, res.anchor, h);
+      expect(rates.get('food')).toBeCloseTo(0.02, 4);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

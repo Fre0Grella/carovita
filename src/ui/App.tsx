@@ -147,7 +147,7 @@ export function App(): JSX.Element {
       <header className="masthead">
         <h1 style={{ margin: 0 }}>Carovita</h1>
         <p>
-          Quanto ti costerà vivere fra {horizon} anni, e quale scelta ti fa
+          Quanto ti costerà vivere fra {horizon.toLocaleString('it-IT')} anni, e quale scelta ti fa
           risparmiare di più.
         </p>
       </header>
@@ -363,7 +363,8 @@ function Summary({
   const first = result.years[0]!;
   const last = result.years[result.years.length - 1]!;
   const spendNow = first.totalNominal;
-  const spendEnd = real ? last.totalReal : last.totalNominal;
+  // L'ultimo periodo puo' durare meno di un anno: la spesa va annualizzata.
+  const spendEnd = (real ? last.totalReal : last.totalNominal) / last.fraction;
   const savingNow = first.savingsNominal;
   const wealth = real
     ? last.cumulativeWealth / last.priceLevel

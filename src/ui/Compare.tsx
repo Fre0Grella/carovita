@@ -38,7 +38,8 @@ export function Compare({ results, colors, real }: Props): JSX.Element {
       const row: Record<string, number | string> = { anno: year };
       results.forEach((r, ri) => {
         const y = r.years[i];
-        if (y) row[`p${ri}`] = real ? y.totalReal : y.totalNominal;
+        // Spesa riportata all'anno: l'ultimo periodo puo' essere parziale.
+        if (y) row[`p${ri}`] = (real ? y.totalReal : y.totalNominal) / y.fraction;
       });
       return row;
     });

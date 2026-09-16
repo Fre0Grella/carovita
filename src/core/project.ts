@@ -464,8 +464,12 @@ export function forecastRatesByCategory(
   if (horizon <= 0) return out;
   for (const m of models) {
     const path = cumulativeIndex(m, anchor, horizon);
-    const level = path[horizon]!.level;
-    out.set(m.category, Math.pow(level, 1 / horizon) - 1);
+    // L'indice contiene solo anni interi: con un orizzonte di un anno e mezzo
+    // l'ultimo livello calcolato e' quello a un anno. Indicizzare con
+    // l'orizzonte frazionario leggerebbe fuori dall'array.
+    const n = path.length - 1;
+    if (n < 1) continue;
+    out.set(m.category, Math.pow(path[n]!.level, 1 / n) - 1);
   }
   return out;
 }
