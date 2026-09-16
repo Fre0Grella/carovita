@@ -20,7 +20,8 @@ import type {
   Profile,
   ProjectionResult,
 } from '../core/types.js';
-import { loadSnapshot } from '../data/load.js';
+import { ROOM_QUOTES } from '../core/rooms.js';
+import { loadCities, loadSnapshot } from '../data/load.js';
 import { Compare } from './Compare.js';
 import { ConfigPanel } from './ConfigPanel.js';
 import { DataPanel } from './DataPanel.js';
@@ -77,6 +78,26 @@ export function App(): JSX.Element {
   // conserva il valore scelto e lo si limita al momento dell'uso: accorciando
   // e riallungando l'orizzonte la scelta non va persa. Di partenza, l'ultimo.
   const [selectedYear, setSelectedYear] = useState(Number.MAX_SAFE_INTEGER);
+
+  // Il canone al metro quadro dei comuni serve solo in due casi: stimare il
+  // canone che l'utente non ha inserito, e il prezzo delle stanze nei comuni
+  // senza una media pubblicata. Solo allora si scarica l'elenco completo.
+  const needsCities = profiles.some((p) => {
+    const hs = p.housing;
+    if (hs.contractType === 'proprieta') return false;
+    if (hs.sharing?.rentBasis === 'room') {
+      return !ROOM_QUOTES.some((q) => q.istatCode === hs.istatCode);
+    }
+    return hs.monthlyRent === null;
+  });
+  useEffect(() => {
+    if (!snapshot || !needsCities || snapshot.cities.length > 0) return;
+    loadCities()
+      .then((cities) => setSnapshot((s) => (s ? { ...s, cities } : s)))
+      .catch(() => {
+        /* senza elenco si usa la media nazionale, con una stima piu' larga */
+      });
+  }, [snapshot, needsCities]);
 
   useEffect(() => {
     loadSnapshot()
@@ -325,6 +346,7 @@ export function App(): JSX.Element {
           onChange={updateActive}
           forecastRates={forecastRates}
           startMonth={startMonth}
+          rentOutlook={activeResult?.rentOutlook ?? null}
         />
       )}
       {tab === 'previsione' && activeResult && (

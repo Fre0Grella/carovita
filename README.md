@@ -20,9 +20,12 @@ browser e nessuna configurazione lascia il dispositivo.
 - **Spese non mensili**: bollette ogni 2, 3 o 6 mesi, premi annuali in un mese
   fisso, pagamenti a rate e spese una tantum future, ciascuna nel mese in cui
   la paghi.
-- **Coabitazione**: ripartizione del canone fra coinquilini in base alla
-  metratura della camera e agli spazi comuni, con camera doppia e imposte a
-  carico del solo intestatario.
+- **Coabitazione**: parti dal canone della tua stanza (o da quello
+  dell'intero appartamento, ripartito per metrature), con camera doppia e
+  imposte a carico del solo intestatario.
+- **Aumenti ai rinnovi**: il tuo canone confrontato con il prezzo delle stanze
+  simili, e una previsione di quanto potrebbe salire a ogni scadenza del
+  contratto.
 - **Previsione** da un anno e mezzo a 30 anni per categoria, con bande di
   incertezza. Gli importi sono in euro correnti, con accanto il loro valore in
   euro di oggi: l'inflazione si vede, invece di stare dietro un interruttore.
@@ -132,6 +135,43 @@ Due dettagli che è facile sbagliare e che qui sono modellati:
 Le spese condominiali si dividono invece in parti uguali: cucina, pulizie e
 ascensore non dipendono da quanto è grande la tua camera.
 
+### Stanze: prezzo di mercato e aumenti ai rinnovi
+
+Chi affitta una stanza sotto il prezzo di stanze simili se lo aspetta: prima o
+poi, a un rinnovo, arriva l'aumento. Il modello rende quel ragionamento
+esplicito.
+
+**Il prezzo delle stanze simili** parte dal prezzo medio richiesto per una
+stanza singola pubblicato da Immobiliare.it Insights (agosto 2026) per 21
+città. Per gli altri comuni si ricava dal canone al metro quadro: nelle 21
+città una singola costa in media quanto **45 m²** di appartamento
+semicentrale, con una dispersione fra città del 14% (il test lo riverifica sui
+dati). Poi, ciascuna marcata come dato, derivazione o ipotesi:
+
+- la zona sposta la stima di metà dello scarto osservato fra quartieri a Milano
+  e Roma;
+- un posto letto in doppia vale circa il 70% di una singola (**ipotesi**: non ci
+  sono dati pubblici affidabili);
+- classe energetica e persone per bagno correggono di qualche punto
+  (**ipotesi**, modificabile).
+
+La metratura della stanza non corregge la stima: servirebbe la superficie di
+una «stanza media», che nessuno pubblica. Il confronto più affidabile resta
+quello che l'utente conosce, **quanto pagano stanze davvero simili**, che
+sostituisce la stima.
+
+**Quando**: il canone cambia solo quando il contratto si rinegozia. Un
+contratto per studenti si rinnova una volta in automatico, quindi un contratto
+di un anno cambia prezzo ogni due. Inserendo la data di inizio, l'aumento cade
+nel mese giusto.
+
+**Quanto**: a ogni rinnovo il proprietario recupera una parte del divario, mai
+un ribasso, con importi arrotondati ai cinque euro. La quota recuperata è
+un'**ipotesi dichiarata** (un terzo, modificabile): non esistono dati su come si
+rinegozia con chi è già in casa. La banda della previsione va da «nessun
+recupero» a «subito al prezzo alto delle stanze simili». Con stanze simili a
+280 euro e un canone di 210, il modello prevede 235, poi 260, poi 280.
+
 ### I periodi partono da oggi, non da gennaio
 
 Le proiezioni scorrono in finestre di dodici mesi **a partire dal mese
@@ -226,6 +266,7 @@ letta come ordine di grandezza.
 | Indice FOI per i canoni | **ISTAT** | SDMX, FOI al netto dei tabacchi, raccordato sulle quattro basi d'indice dal 1996 |
 | Anagrafica dei comuni | elenco ufficiale ISTAT dei codici dei comuni | 7.904 comuni |
 | Canoni al metro quadro | baseline indicativa inclusa nel progetto | **non** quotazioni OMI ufficiali — vedi sotto |
+| Prezzo delle stanze singole | **Immobiliare.it Insights**, agosto 2026 | media degli annunci in 21 città, ripresa dal comunicato |
 
 > **Attenzione al cambio di classificazione.** Il 4 febbraio 2026 Eurostat è
 > passata da ECOICOP 1 a ECOICOP 2. I vecchi dataset (`prc_hicp_midx`,
@@ -261,7 +302,7 @@ npm run dev            # http://localhost:5173/carovita/
 Altri comandi:
 
 ```bash
-npm test          # 110 test: invarianti di dominio + integrazione sui dati veri
+npm test          # 127 test: invarianti di dominio + integrazione sui dati veri
 npm run typecheck
 npm run backtest  # rigenera docs/BACKTEST.md
 npm run build
@@ -275,7 +316,8 @@ src/core/      motore di calcolo, puro: niente rete, filesystem o DOM
   types.ts     tipi di dominio
   series.ts    utilità sulle serie storiche
   model.ts     stima e previsione dell'inflazione per categoria
-  rent.ts      regole contrattuali degli affitti e imposte
+  rent.ts      regole contrattuali degli affitti, imposte e rinnovi, mese per mese
+  rooms.ts     prezzo di mercato delle stanze e sua stima
   schedule.ts  calendario degli addebiti: cadenze, rate, spese una tantum
   project.ts   da (profilo + dati) a previsione mensile con attribuzione
   backtest.ts  validazione walk-forward fuori campione

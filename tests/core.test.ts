@@ -29,6 +29,13 @@ import {
   summarize,
 } from '../src/core/project.js';
 import {
+  DOUBLE_ROOM_FACTOR,
+  ROOM_EQUIVALENT_SQM,
+  ZONE_ROOM_FACTOR,
+  proposedQualityAdjustment,
+  roomBenchmark,
+} from '../src/core/rooms.js';
+import {
   MONTHLY,
   chargesAt,
   describeSchedule,
@@ -108,6 +115,9 @@ const baseHousing: HousingConfig = {
   highTensionMunicipality: false,
   condoFees: 0,
   sharing: null,
+  contractStart: null,
+  contractYears: null,
+  renewalCatchUp: 1 / 3,
 };
 
 function makeProfile(overrides: Partial<Profile> = {}): Profile {
@@ -585,6 +595,13 @@ describe('coabitazione', () => {
       ...baseHousing,
       sqm: 90,
       sharing: {
+        rentBasis: 'apartment',
+        roomRent: null,
+        contractScope: 'apartment',
+        bathrooms: null,
+        energyClass: null,
+        comparableRent: null,
+        qualityAdjustment: null,
         roomSqm: 14,
         roomShared: false,
         bedroomsSqm: 48,
@@ -982,13 +999,18 @@ describe('periodi', () => {
 
   it('un periodo parziale costa in proporzione ai mesi', () => {
     const snap = makeSnapshot();
-    const pieno = project(makeProfile(), snap, {
+    // Con la cedolare secca non ci sono imposte annuali, che cadono per
+    // intero nel mese dell'anniversario e non si dividono per i mesi.
+    const profilo = makeProfile({
+      housing: { ...baseHousing, cedolareSecca: true },
+    });
+    const pieno = project(profilo, snap, {
       startMonth: '2026-09',
       horizon: 2,
       anchorOverride: 0,
       confidence: 0.8,
     });
-    const mezzo = project(makeProfile(), snap, {
+    const mezzo = project(profilo, snap, {
       startMonth: '2026-09',
       horizon: 1.5,
       anchorOverride: 0,
@@ -1272,5 +1294,197 @@ describe('proiezione mensile', () => {
     const last12 = res.months.slice(-12).reduce((a, m) => a + m.spend, 0);
     expect(s.baseSpend).toBeCloseTo(first12, 6);
     expect(s.finalSpend).toBeCloseTo(last12, 6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Stanze: prezzo di mercato e rinnovi
+// ---------------------------------------------------------------------------
+
+describe('stanze e rinnovi', () => {
+  const flatIndex = Array.from({ length: 21 }, () => 1);
+  const foiRates = Array.from({ length: 21 }, () => 0.02);
+
+  /** Stanza singola a Bologna, contratto per studenti di un anno. */
+  function room(
+    sharing: Partial<SharingConfig> = {},
+    housing: Partial<HousingConfig> = {},
+  ): HousingConfig {
+    return {
+      ...baseHousing,
+      istatCode: '037006',
+      zone: 'semicentro',
+      contractType: 'studenti',
+      contractYears: 1,
+      cedolareSecca: true,
+      istatIndexation: false,
+      monthlyRent: null,
+      sqm: 0,
+      sharing: {
+        rentBasis: 'room',
+        roomRent: 210,
+        contractScope: 'room',
+        bathrooms: null,
+        energyClass: null,
+        comparableRent: null,
+        qualityAdjustment: null,
+        roomSqm: 12,
+        roomShared: false,
+        bedroomsSqm: 0,
+        occupants: 4,
+        onContract: true,
+        ...sharing,
+      },
+      ...housing,
+    };
+  }
+
+  it('parte dal prezzo medio pubblicato della citta’', () => {
+    const b = roomBenchmark(room(), null)!;
+    expect(b.basis).toBe('dato');
+    expect(b.central).toBeCloseTo(585, 6);
+    expect(b.lo).toBeLessThan(585);
+    expect(b.hi).toBeGreaterThan(585);
+  });
+
+  it('corregge per zona e per camera doppia, dichiarando le ipotesi', () => {
+    const centro = roomBenchmark(room({}, { zone: 'centro' }), null)!;
+    expect(centro.central).toBeCloseTo(585 * ZONE_ROOM_FACTOR.centro, 6);
+    const doppia = roomBenchmark(room({ roomShared: true }), null)!;
+    expect(doppia.central).toBeCloseTo(585 * DOUBLE_ROOM_FACTOR, 6);
+    expect(doppia.steps.some((s) => s.kind === 'ipotesi')).toBe(true);
+  });
+
+  it('il prezzo di stanze simili inserito dall’utente sostituisce la stima', () => {
+    const b = roomBenchmark(room({ comparableRent: 280 }), null)!;
+    expect(b.basis).toBe('tuo');
+    expect(b.central).toBe(280);
+  });
+
+  it('per i comuni senza media la ricava dal canone al metro quadro', () => {
+    const b = roomBenchmark(room({}, { istatCode: '999999' }), 8)!;
+    expect(b.basis).toBe('derivato');
+    expect(b.central).toBeCloseTo(ROOM_EQUIVALENT_SQM * 8, 6);
+    // Senza dati sul comune l'intervallo e' piu' largo.
+    const dato = roomBenchmark(room(), null)!;
+    expect(b.hi / b.central).toBeGreaterThan(dato.hi / dato.central);
+  });
+
+  it('propone una correzione per classe energetica e bagni', () => {
+    const q = proposedQualityAdjustment(
+      room({ energyClass: 'G', bathrooms: 1, occupants: 4 }).sharing!,
+    );
+    expect(q.value).toBeCloseTo(-0.06, 10);
+    expect(q.reasons).toHaveLength(2);
+  });
+
+  it('un contratto per studenti di un anno si rinegozia ogni due anni', () => {
+    expect(contractTerm('studenti')).toEqual({ first: 1, renewal: 1 });
+    expect(contractTerm('studenti', 2)).toEqual({ first: 2, renewal: 2 });
+    expect(contractTerm('transitorio', 5)).toEqual({ first: 1.5, renewal: 0 });
+  });
+
+  it('al rinnovo recupera parte del divario, arrotondando ai cinque euro', () => {
+    const sched = buildRentSchedule({
+      housing: room({}, { renewalCatchUp: 1 / 3 }),
+      initialMonthlyRent: 210,
+      periods: buildPeriods('2026-09', 5),
+      marketIndex: flatIndex,
+      foiRates,
+      condoIndex: flatIndex,
+      benchmark: 280,
+    });
+    // Nessun aumento per due anni, poi 210 + (280 - 210) / 3 = 233 -> 235.
+    expect(sched[1]!.monthlyRentEnd).toBe(210);
+    expect(sched[2]!.monthlyRent).toBe(235);
+    // Al rinnovo successivo 235 + (280 - 235) / 3 = 250.
+    expect(sched[4]!.monthlyRent).toBe(250);
+    expect(sched[2]!.renewals[0]!.month).toBe('2028-09');
+  });
+
+  it('non abbassa il canone se e’ gia’ sopra il mercato', () => {
+    const sched = buildRentSchedule({
+      housing: room(),
+      initialMonthlyRent: 400,
+      periods: buildPeriods('2026-09', 5),
+      marketIndex: flatIndex,
+      foiRates,
+      condoIndex: flatIndex,
+      benchmark: 300,
+    });
+    for (const y of sched) expect(y.monthlyRent).toBe(400);
+  });
+
+  it('colloca il rinnovo nel mese giusto se il contratto e’ iniziato prima', () => {
+    // Contratto iniziato a settembre 2025, proiezione da marzo 2026: il
+    // rinnovo cade a settembre 2027, il settimo mese del secondo periodo.
+    const sched = buildRentSchedule({
+      housing: room({}, { contractStart: '2025-09', renewalCatchUp: 1 }),
+      initialMonthlyRent: 210,
+      periods: buildPeriods('2026-03', 3),
+      marketIndex: flatIndex,
+      foiRates,
+      condoIndex: flatIndex,
+      benchmark: 280,
+    });
+    expect(sched[1]!.monthlyRent).toBe(210);
+    expect(sched[1]!.months[5]!.rent).toBe(210);
+    expect(sched[1]!.months[6]!.rent).toBe(280);
+    expect(sched[1]!.monthlyRentEnd).toBe(280);
+  });
+
+  it('paga l’imposta di registro all’anniversario del contratto', () => {
+    const sched = buildRentSchedule({
+      housing: {
+        ...baseHousing,
+        cedolareSecca: false,
+        contractStart: '2025-12',
+      },
+      initialMonthlyRent: 1000,
+      periods: buildPeriods('2026-09', 1),
+      marketIndex: flatIndex,
+      foiRates,
+      condoIndex: flatIndex,
+    });
+    const taxed = sched[0]!.months.map((m) => m.taxes > 0);
+    // Settembre e' il mese 0: dicembre e' il mese 3.
+    expect(taxed.indexOf(true)).toBe(3);
+    expect(taxed.filter(Boolean)).toHaveLength(1);
+  });
+
+  it('la proiezione riporta i rinnovi attesi con i loro estremi', () => {
+    const p = makeProfile({ housing: room({}, { renewalCatchUp: 1 / 3 }) });
+    const res = project(p, makeSnapshot(), {
+      startMonth: '2026-09',
+      horizon: 5,
+      anchorOverride: null,
+      confidence: 0.8,
+    });
+    const o = res.rentOutlook!;
+    expect(o.basis).toBe('room');
+    expect(o.currentRent).toBe(210);
+    expect(o.gap!).toBeGreaterThan(1); // 585 contro 210
+    expect(o.renewals.length).toBeGreaterThanOrEqual(2);
+    for (const r of o.renewals) {
+      expect(r.toLo).toBeLessThanOrEqual(r.to);
+      expect(r.to).toBeLessThanOrEqual(r.toHi);
+      expect(r.to).toBeGreaterThan(r.from);
+    }
+    // Il riallineamento entra nell'attribuzione, che chiude comunque.
+    for (const y of res.years) {
+      for (const c of y.categories) {
+        const a = c.attribution;
+        const sum =
+          a.base + a.fromAnchor + a.fromSpread + a.fromPersistence +
+          a.fromOverride + a.fromContract + a.fromMarketGap;
+        expect(sum).toBeCloseTo(c.nominal, 6);
+      }
+    }
+    const last = res.years[res.years.length - 1]!.categories.find(
+      (c) => c.category === 'rent',
+    )!;
+    expect(last.attribution.fromMarketGap).toBeGreaterThan(0);
+    expect(last.lo).toBeLessThan(last.nominal);
+    expect(last.hi).toBeGreaterThan(last.nominal);
   });
 });

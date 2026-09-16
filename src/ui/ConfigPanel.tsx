@@ -10,13 +10,18 @@ import type {
   CategoryId,
   CityRentQuote,
   ContractType,
+  EnergyClass,
   ExpenseItem,
   ExpenseSchedule,
   Profile,
+  RentOutlook,
   SharingConfig,
   ZoneTier,
 } from '../core/types.js';
-import { computeShare, contractLabel } from '../core/rent.js';
+import { computeShare, contractLabel, contractTerm } from '../core/rent.js';
+import { proposedQualityAdjustment } from '../core/rooms.js';
+import { monthIndex, monthLabel } from '../core/series.js';
+import { BenchmarkSteps, RenewalTable, gapSentence } from './RentOutlook.js';
 import {
   MONTHLY,
   MONTH_NAMES,
@@ -25,8 +30,8 @@ import {
   monthlyEquivalent,
 } from '../core/schedule.js';
 import { CityPicker } from './CityPicker.js';
-import { CATEGORY_LABELS, SELECTABLE_CATEGORIES } from './defaults.js';
-import { aMese, eur, pct } from './format.js';
+import { CATEGORY_LABELS, SELECTABLE_CATEGORIES, newSharing } from './defaults.js';
+import { aMese, eur, pct, pctSigned } from './format.js';
 
 interface Props {
   profile: Profile;
@@ -39,6 +44,8 @@ interface Props {
   forecastRates: Map<CategoryId, number>;
   /** Mese di partenza della proiezione, `YYYY-MM`: default per rate e date. */
   startMonth: string;
+  /** Il tuo affitto rispetto al mercato, dalla proiezione del profilo. */
+  rentOutlook: RentOutlook | null;
 }
 
 const CONTRACTS: ContractType[] = [
@@ -60,6 +67,7 @@ export function ConfigPanel({
   onChange,
   forecastRates,
   startMonth,
+  rentOutlook,
 }: Props): JSX.Element {
   const h = profile.housing;
   const set = (patch: Partial<Profile>): void =>
@@ -69,7 +77,11 @@ export function ConfigPanel({
 
   const isRenting = h.contractType !== 'proprieta';
   const shared = h.sharing !== null;
+  const roomBasis = h.sharing?.rentBasis === 'room';
   const breakdown = computeShare(h);
+  const renewalAt = nextRenewal(h, startMonth);
+  const term = contractTerm(h.contractType, h.contractYears);
+  const cycleYears = term.first + term.renewal;
 
   const setSharing = (patch: Partial<SharingConfig>): void => {
     if (!h.sharing) return;
@@ -151,6 +163,7 @@ export function ConfigPanel({
               <div className="field">
                 <label htmlFor="h-sqm">
                   Superficie dell{'’'}intera abitazione (m²)
+                  {roomBasis ? ', facoltativa' : ''}
                 </label>
                 <input
                   id="h-sqm"
@@ -165,6 +178,7 @@ export function ConfigPanel({
                 </span>
               </div>
 
+              {!roomBasis && (
               <div className="field">
                 <label htmlFor="h-rent">
                   {shared
@@ -193,6 +207,7 @@ export function ConfigPanel({
                       'canone che paghi davvero è sempre il dato più accurato.'}
                 </span>
               </div>
+              )}
 
               <div className="field">
                 <label htmlFor="h-condo">
@@ -236,6 +251,58 @@ export function ConfigPanel({
                   <option value={0}>Tutta a carico del locatore</option>
                 </select>
               </div>
+
+              <div className="field">
+                <label>Inizio del contratto attuale</label>
+                <div className="row" style={{ flexWrap: 'nowrap' }}>
+                  <MonthPicker
+                    label="Inizio del contratto"
+                    value={h.contractStart ?? startMonth}
+                    startMonth={startMonth}
+                    pastYears={12}
+                    onChange={(t) =>
+                      setHousing({ contractStart: t === startMonth ? null : t })
+                    }
+                  />
+                </div>
+                <span className="hint">
+                  Il canone si rinegozia ogni{' '}
+                  {cycleYears.toLocaleString('it-IT')}{' '}
+                  {cycleYears === 1 ? 'anno' : 'anni'}
+                  {renewalAt ? `: prossimo rinnovo ${aMese(renewalAt)}.` : '.'}
+                </span>
+              </div>
+
+              {(h.contractType === 'studenti' || h.contractType === 'transitorio') && (
+                <div className="field">
+                  <label htmlFor="h-years">Durata di ogni contratto</label>
+                  <select
+                    id="h-years"
+                    value={term.first}
+                    onChange={(e) =>
+                      setHousing({ contractYears: Number(e.target.value) })
+                    }
+                  >
+                    {(h.contractType === 'studenti'
+                      ? [0.5, 1, 1.5, 2, 2.5, 3]
+                      : [0.5, 1, 1.5]
+                    ).map((y) => (
+                      <option key={y} value={y}>
+                        {y === 0.5
+                          ? '6 mesi'
+                          : y === 1.5
+                            ? '18 mesi'
+                            : `${y.toLocaleString('it-IT')} ${y === 1 ? 'anno' : 'anni'}`}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="hint">
+                    {h.contractType === 'studenti'
+                      ? 'Da 6 mesi a 3 anni. Si rinnova una volta in automatico, quindi il canone può cambiare ogni due durate.'
+                      : 'Al massimo 18 mesi, senza rinnovo automatico.'}
+                  </span>
+                </div>
+              )}
             </>
           )}
         </div>
@@ -250,13 +317,7 @@ export function ConfigPanel({
                 onChange={(e) =>
                   setHousing({
                     sharing: e.target.checked
-                      ? {
-                          roomSqm: 14,
-                          roomShared: false,
-                          bedroomsSqm: Math.round(h.sqm * 0.5),
-                          occupants: 3,
-                          onContract: true,
-                        }
+                      ? { ...newSharing('room'), bedroomsSqm: Math.round(h.sqm * 0.5) }
                       : null,
                   })
                 }
@@ -264,7 +325,7 @@ export function ConfigPanel({
               <div>
                 <label htmlFor="h-sharing">Divido casa con altre persone</label>
                 <div className="hint">
-                  Ripartisce canone, imposte e condominio fra i conviventi.
+                  Affitti una stanza, o dividi il canone con i coinquilini.
                 </div>
               </div>
             </div>
@@ -335,15 +396,54 @@ export function ConfigPanel({
 
             {shared && h.sharing && (
               <div className="field" style={{ gridColumn: '1 / -1' }}>
-                <h3 style={{ margin: '4px 0 2px' }}>Come si divide il canone</h3>
-                <p className="muted small" style={{ margin: '0 0 10px' }}>
-                  La tua camera per intero, più la tua parte di cucina, bagni e
-                  spazi comuni divisi in parti uguali. È il criterio con cui i
-                  coinquilini si accordano davvero, e garantisce che le quote di
-                  tutti sommino esattamente al canone.
-                </p>
+                <h3 style={{ margin: '4px 0 2px' }}>Coabitazione</h3>
 
-                <div className="grid">
+                <div className="grid" style={{ marginTop: 6 }}>
+                  <div className="field">
+                    <label htmlFor="sh-basis">Quale canone conosci?</label>
+                    <select
+                      id="sh-basis"
+                      value={h.sharing.rentBasis}
+                      onChange={(e) =>
+                        setSharing({
+                          rentBasis: e.target.value as SharingConfig['rentBasis'],
+                        })
+                      }
+                    >
+                      <option value="room">Quello della mia stanza</option>
+                      <option value="apartment">
+                        Quello dell’intero appartamento
+                      </option>
+                    </select>
+                    <span className="hint">
+                      {roomBasis
+                        ? 'Il caso tipico: confrontiamo il tuo canone con le stanze simili e prevediamo gli aumenti ai rinnovi.'
+                        : 'La tua quota si ricava dalle metrature di camera e spazi comuni.'}
+                    </span>
+                  </div>
+
+                  {roomBasis && (
+                    <div className="field">
+                      <label htmlFor="sh-roomrent">
+                        Canone mensile della tua stanza (€)
+                      </label>
+                      <input
+                        id="sh-roomrent"
+                        type="number"
+                        min={0}
+                        step={5}
+                        value={h.sharing.roomRent ?? ''}
+                        placeholder="stima automatica"
+                        onChange={(e) =>
+                          setSharing({
+                            roomRent:
+                              e.target.value === '' ? null : Number(e.target.value),
+                          })
+                        }
+                      />
+                    </div>
+                  )}
+
                   <div className="field">
                     <label htmlFor="sh-room">La tua camera (m²)</label>
                     <input
@@ -358,24 +458,26 @@ export function ConfigPanel({
                     />
                   </div>
 
-                  <div className="field">
-                    <label htmlFor="sh-bedrooms">
-                      Totale di tutte le camere (m²)
-                    </label>
-                    <input
-                      id="sh-bedrooms"
-                      type="number"
-                      min={1}
-                      max={500}
-                      value={h.sharing.bedroomsSqm}
-                      onChange={(e) =>
-                        setSharing({ bedroomsSqm: Number(e.target.value) })
-                      }
-                    />
-                    <span className="hint">
-                      Serve a ricavare per differenza gli spazi comuni.
-                    </span>
-                  </div>
+                  {!roomBasis && (
+                    <div className="field">
+                      <label htmlFor="sh-bedrooms">
+                        Totale di tutte le camere (m²)
+                      </label>
+                      <input
+                        id="sh-bedrooms"
+                        type="number"
+                        min={1}
+                        max={500}
+                        value={h.sharing.bedroomsSqm}
+                        onChange={(e) =>
+                          setSharing({ bedroomsSqm: Number(e.target.value) })
+                        }
+                      />
+                      <span className="hint">
+                        Serve a ricavare per differenza gli spazi comuni.
+                      </span>
+                    </div>
+                  )}
 
                   <div className="field">
                     <label htmlFor="sh-occ">Persone in casa</label>
@@ -390,6 +492,101 @@ export function ConfigPanel({
                       }
                     />
                   </div>
+
+                  {roomBasis && (
+                    <>
+                      <div className="field">
+                        <label htmlFor="sh-baths">Bagni (facoltativo)</label>
+                        <input
+                          id="sh-baths"
+                          type="number"
+                          min={1}
+                          max={10}
+                          value={h.sharing.bathrooms ?? ''}
+                          placeholder="non so"
+                          onChange={(e) =>
+                            setSharing({
+                              bathrooms:
+                                e.target.value === '' ? null : Number(e.target.value),
+                            })
+                          }
+                        />
+                      </div>
+
+                      <div className="field">
+                        <label htmlFor="sh-energy">
+                          Classe energetica (facoltativa)
+                        </label>
+                        <select
+                          id="sh-energy"
+                          value={h.sharing.energyClass ?? ''}
+                          onChange={(e) =>
+                            setSharing({
+                              energyClass:
+                                e.target.value === ''
+                                  ? null
+                                  : (e.target.value as EnergyClass),
+                            })
+                          }
+                        >
+                          <option value="">Non so</option>
+                          {ENERGY_CLASSES.map((c) => (
+                            <option key={c} value={c}>
+                              {c}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="field">
+                        <label htmlFor="sh-scope">Il contratto riguarda</label>
+                        <select
+                          id="sh-scope"
+                          value={h.sharing.contractScope}
+                          onChange={(e) =>
+                            setSharing({
+                              contractScope: e.target
+                                .value as SharingConfig['contractScope'],
+                            })
+                          }
+                        >
+                          <option value="room">Solo la mia stanza</option>
+                          <option value="apartment">
+                            Tutto l’appartamento, con i coinquilini
+                          </option>
+                        </select>
+                        <span className="hint">
+                          Cambia la base dell’imposta di registro, se non c’è
+                          la cedolare secca.
+                        </span>
+                      </div>
+
+                      <div className="field">
+                        <label htmlFor="sh-comparable">
+                          Quanto pagano stanze simili (€/mese, se lo sai)
+                        </label>
+                        <input
+                          id="sh-comparable"
+                          type="number"
+                          min={0}
+                          step={5}
+                          value={h.sharing.comparableRent ?? ''}
+                          placeholder="stima automatica"
+                          onChange={(e) =>
+                            setSharing({
+                              comparableRent:
+                                e.target.value === '' ? null : Number(e.target.value),
+                            })
+                          }
+                        />
+                        <span className="hint">
+                          Coinquilini, compagni di corso, annunci nella tua zona
+                          con metratura e servizi simili: è il confronto più
+                          affidabile e sostituisce la stima.
+                        </span>
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 <div className="grid" style={{ marginTop: 10 }}>
@@ -407,8 +604,9 @@ export function ConfigPanel({
                         È una camera doppia
                       </label>
                       <div className="hint">
-                        La dividi con un{'’'}altra persona, quindi conta
-                        per metà.
+                        {roomBasis
+                          ? 'Paghi un posto letto: si confronta con i posti letto, non con le singole.'
+                          : 'La dividi con un’altra persona, quindi conta per metà.'}
                       </div>
                     </div>
                   </div>
@@ -435,47 +633,56 @@ export function ConfigPanel({
                   </div>
                 </div>
 
-                <div
-                  className="notice info"
-                  style={{ marginTop: 12, marginBottom: 0 }}
-                >
-                  <strong>La tua quota: {pct(breakdown.rentShare, 1)}</strong>{' '}
-                  del canone
-                  {h.monthlyRent
-                    ? ` — ${eur(h.monthlyRent * breakdown.rentShare)} al mese su ${eur(h.monthlyRent)}`
-                    : ''}
-                  .
-                  <div className="small muted" style={{ marginTop: 4 }}>
-                    {breakdown.privateSqm.toLocaleString('it-IT')} m² di camera
-                    {h.sharing.roomShared ? ' (metà della doppia)' : ''} +{' '}
-                    {breakdown.commonSqm.toLocaleString('it-IT', {
-                      maximumFractionDigits: 1,
-                    })}{' '}
-                    m² di spazi comuni ={' '}
-                    {breakdown.weightedSqm.toLocaleString('it-IT', {
-                      maximumFractionDigits: 1,
-                    })}{' '}
-                    m² su {h.sqm} m² totali.
+                {roomBasis ? (
+                  <RoomMarketPanel
+                    housing={h}
+                    outlook={rentOutlook}
+                    onSharing={setSharing}
+                    onHousing={setHousing}
+                  />
+                ) : (
+                  <div
+                    className="notice info"
+                    style={{ marginTop: 12, marginBottom: 0 }}
+                  >
+                    <strong>La tua quota: {pct(breakdown.rentShare, 1)}</strong>{' '}
+                    del canone
+                    {h.monthlyRent
+                      ? ` — ${eur(h.monthlyRent * breakdown.rentShare)} al mese su ${eur(h.monthlyRent)}`
+                      : ''}
+                    .
+                    <div className="small muted" style={{ marginTop: 4 }}>
+                      {breakdown.privateSqm.toLocaleString('it-IT')} m² di camera
+                      {h.sharing.roomShared ? ' (metà della doppia)' : ''} +{' '}
+                      {breakdown.commonSqm.toLocaleString('it-IT', {
+                        maximumFractionDigits: 1,
+                      })}{' '}
+                      m² di spazi comuni ={' '}
+                      {breakdown.weightedSqm.toLocaleString('it-IT', {
+                        maximumFractionDigits: 1,
+                      })}{' '}
+                      m² su {h.sqm} m² totali.
+                    </div>
+                    {breakdown.warnings.length > 0 && (
+                      <ul className="small" style={{ marginBottom: 0 }}>
+                        {breakdown.warnings.map((w, i) => (
+                          <li key={i}>{w}</li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
-                  {breakdown.warnings.length > 0 && (
-                    <ul className="small" style={{ marginBottom: 0 }}>
-                      {breakdown.warnings.map((w, i) => (
-                        <li key={i}>{w}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
+                )}
               </div>
             )}
 
             <div className="field" style={{ gridColumn: '1 / -1' }}>
               <div className="hint">
-                Alla scadenza del contratto si firma un contratto nuovo, e il
-                canone torna ai prezzi di mercato correnti: decadono sia il
-                tetto del 75% sugli scatti ISTAT sia il blocco legato alla
+                Alla scadenza del contratto se ne firma uno nuovo: decadono sia
+                il tetto del 75% sugli scatti ISTAT sia il blocco legato alla
                 cedolare secca, che vale per quel contratto e non per sempre.
-                È il salto che chi affitta conosce bene, e il modello lo
-                applica anche se resti nella stessa casa.
+                {roomBasis
+                  ? ' Per una stanza il canone si avvicina al prezzo delle stanze simili, di quanto indicato sopra.'
+                  : ' Il canone torna ai prezzi di mercato: è il salto che chi affitta conosce bene, e il modello lo applica anche se resti nella stessa casa.'}
               </div>
             </div>
           </div>
@@ -1066,4 +1273,121 @@ function GrowthCell({
       </div>
     </td>
   );
+}
+
+// ---------------------------------------------------------------------------
+
+const ENERGY_CLASSES: EnergyClass[] = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
+
+/**
+ * Confronto con il mercato per chi affitta una stanza: la stima del prezzo
+ * delle stanze simili, le ipotesi modificabili e l'anteprima dei rinnovi.
+ */
+function RoomMarketPanel({
+  housing,
+  outlook,
+  onSharing,
+  onHousing,
+}: {
+  housing: Profile['housing'];
+  outlook: RentOutlook | null;
+  onSharing: (patch: Partial<SharingConfig>) => void;
+  onHousing: (patch: Partial<Profile['housing']>) => void;
+}): JSX.Element {
+  const sharing = housing.sharing!;
+  const proposed = proposedQualityAdjustment(sharing);
+  const usingComparable = sharing.comparableRent !== null && sharing.comparableRent > 0;
+  const adjustment = sharing.qualityAdjustment ?? proposed.value;
+
+  return (
+    <div className="notice info" style={{ marginTop: 12, marginBottom: 0 }}>
+      {outlook?.benchmark ? (
+        <>
+          {gapSentence(outlook)}
+          <BenchmarkSteps benchmark={outlook.benchmark} />
+        </>
+      ) : (
+        <span className="muted">Calcolo il prezzo delle stanze simili…</span>
+      )}
+
+      <div className="grid" style={{ marginTop: 12 }}>
+        {!usingComparable && (
+          <div className="field">
+            <label htmlFor="sh-quality">
+              Correzione per la qualità della casa: {pctSigned(adjustment, 0)}
+            </label>
+            <input
+              id="sh-quality"
+              type="range"
+              min={-0.2}
+              max={0.2}
+              step={0.01}
+              value={adjustment}
+              onChange={(e) =>
+                onSharing({ qualityAdjustment: Number(e.target.value) })
+              }
+            />
+            <span className="hint">
+              {sharing.qualityAdjustment === null
+                ? proposed.reasons.length > 0
+                  ? `Proposta: ${proposed.reasons.join(', ')}. Ipotesi: nessun dato pubblico misura questi effetti sulle stanze.`
+                  : 'Indica bagni e classe energetica per una proposta, o sposta tu il valore se la casa è migliore o peggiore della media.'
+                : 'Valore scelto da te.'}{' '}
+              {sharing.qualityAdjustment !== null && (
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ padding: '0 5px', fontSize: 11 }}
+                  onClick={() => onSharing({ qualityAdjustment: null })}
+                >
+                  usa la proposta ({pct(proposed.value, 0)})
+                </button>
+              )}
+            </span>
+          </div>
+        )}
+
+        <div className="field">
+          <label htmlFor="sh-catchup">
+            A ogni rinnovo il proprietario recupera il{' '}
+            {pct(housing.renewalCatchUp, 0)} del divario
+          </label>
+          <input
+            id="sh-catchup"
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={housing.renewalCatchUp}
+            onChange={(e) => onHousing({ renewalCatchUp: Number(e.target.value) })}
+          />
+          <span className="hint">
+            Ipotesi: non esistono dati su come si rinegozia con chi è già in
+            casa. 0% = solo inflazione, 100% = subito al prezzo di mercato. Di
+            solito si recupera un po’ alla volta, per non perdere un inquilino
+            affidabile.
+          </span>
+        </div>
+      </div>
+
+      {outlook && (
+        <div style={{ marginTop: 10 }}>
+          <strong className="small">Prossimi rinnovi</strong>
+          <RenewalTable outlook={outlook} limit={3} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Prossimo mese in cui il contratto si rinegozia, a partire da oggi. */
+function nextRenewal(housing: Profile['housing'], startMonth: string): string | null {
+  if (housing.contractType === 'proprieta') return null;
+  const term = contractTerm(housing.contractType, housing.contractYears);
+  const cycle = Math.max(1, Math.round((term.first + term.renewal) * 12));
+  const start = monthIndex(housing.contractStart ?? startMonth);
+  const now = monthIndex(startMonth);
+  let k = 1;
+  while (start + k * cycle <= now) k++;
+  return monthLabel(start + k * cycle);
 }

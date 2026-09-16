@@ -30,6 +30,7 @@ import {
 } from 'recharts';
 
 import { summarize } from '../core/project.js';
+import { RentOutlookCard } from './RentOutlook.js';
 import { describeSchedule } from '../core/schedule.js';
 import { monthIndex, shortMonthLabel } from '../core/series.js';
 import type {
@@ -81,6 +82,7 @@ export function Forecast({ result, selected, onSelect }: Props): JSX.Element {
       <WealthCard result={result} tl={tl} selected={selected} onSelect={onSelect} />
       <YearExplorer result={result} selected={selected} onSelect={onSelect} />
       <CashFlowCard result={result} tl={tl} selected={selected} onSelect={onSelect} />
+      {result.rentOutlook && <RentOutlookCard outlook={result.rentOutlook} />}
       <Events result={result} />
     </>
   );
@@ -705,6 +707,16 @@ function Attribution({
         'tasso tuo, quindi l’aumento discende interamente da quella scelta.',
     },
     {
+      key: 'marketGap',
+      label: 'Riallineamento alle stanze simili',
+      value: a.fromMarketGap,
+      color: 'var(--series-8)',
+      why:
+        'Ai rinnovi il proprietario recupera parte della differenza fra il ' +
+        'tuo canone e il prezzo delle stanze simili: è l’aumento che ci si ' +
+        'può aspettare quando si paga meno del mercato.',
+    },
+    {
       key: 'contract',
       label: 'Regole del contratto',
       value: a.fromContract,
@@ -941,7 +953,7 @@ function Events({ result }: { result: ProjectionResult }): JSX.Element {
         <table>
           <thead>
             <tr>
-              <th>Periodo</th>
+              <th>Quando</th>
               <th style={{ textAlign: 'left' }}>Evento</th>
               <th>Effetto annuo</th>
             </tr>
@@ -950,7 +962,9 @@ function Events({ result }: { result: ProjectionResult }): JSX.Element {
             {years.flatMap((y) =>
               y.events.map((e, i) => (
                 <tr key={`${y.label}-${i}`}>
-                  <td className="num">{y.labelLong}</td>
+                  <td className="num">
+                    {e.month ? shortMonthLabel(e.month) : y.labelLong}
+                  </td>
                   <td style={{ textAlign: 'left', whiteSpace: 'normal' }}>
                     {e.message}
                   </td>

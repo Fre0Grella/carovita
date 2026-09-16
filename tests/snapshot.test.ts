@@ -20,7 +20,12 @@ import {
   estimateAllModels,
 } from '../src/core/model.js';
 import { annualInflation, decemberInflation } from '../src/core/series.js';
-import type { DataSnapshot } from '../src/core/types.js';
+import {
+  ROOM_EQUIVALENT_SQM,
+  ROOM_QUOTES,
+  ROOM_RATIO_LOG_SD,
+} from '../src/core/rooms.js';
+import type { CityRentQuote, DataSnapshot } from '../src/core/types.js';
 import { makeDefaultProfile } from '../src/ui/defaults.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -234,5 +239,37 @@ d('snapshot reale', () => {
     for (const y of [2019, 2020, 2021, 2022, 2023, 2024, 2025]) {
       expect(dec.has(y)).toBe(true);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Prezzi delle stanze: coerenza fra i dati pubblicati e i canoni al m²
+// ---------------------------------------------------------------------------
+
+describe('prezzi delle stanze', () => {
+  const citiesPath = resolve(__dirname, '../src/data/cities.json');
+
+  it('il rapporto stanza / canone al m² usato per i comuni e’ quello misurato', () => {
+    if (!existsSync(citiesPath)) return;
+    const cities = JSON.parse(readFileSync(citiesPath, 'utf8')) as CityRentQuote[];
+    const ratios: number[] = [];
+    const logs: number[] = [];
+    for (const q of ROOM_QUOTES) {
+      const c = cities.find((x) => x.istatCode === q.istatCode);
+      expect(c, `comune ${q.comune} nell'anagrafica`).toBeDefined();
+      expect(c!.comune).toBe(q.comune);
+      const r = q.single / c!.eurM2Month.semicentro;
+      ratios.push(r);
+      logs.push(Math.log(r));
+    }
+    ratios.sort((a, b) => a - b);
+    const median = ratios[Math.floor(ratios.length / 2)]!;
+    // Se cambiano i dati, la costante va riallineata: il test lo segnala.
+    expect(Math.abs(median - ROOM_EQUIVALENT_SQM)).toBeLessThan(2);
+    const mean = logs.reduce((a, b) => a + b, 0) / logs.length;
+    const sd = Math.sqrt(
+      logs.reduce((a, b) => a + (b - mean) ** 2, 0) / (logs.length - 1),
+    );
+    expect(Math.abs(sd - ROOM_RATIO_LOG_SD)).toBeLessThan(0.03);
   });
 });

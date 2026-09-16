@@ -132,6 +132,9 @@ export type ContractType =
 
 export type ZoneTier = 'centro' | 'semicentro' | 'periferia';
 
+/** Classe energetica dell'attestato di prestazione energetica (APE). */
+export type EnergyClass = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G';
+
 /**
  * Coabitazione: come si ripartisce il canone fra coinquilini.
  *
@@ -141,6 +144,41 @@ export type ZoneTier = 'centro' | 'semicentro' | 'periferia';
  * comuni», ed è quello modellato qui.
  */
 export interface SharingConfig {
+  /**
+   * Quale canone conosci.
+   *
+   * `room`: il canone della tua stanza, che è il caso tipico di chi affitta
+   * una camera; è il dato su cui si confronta il prezzo con quello delle
+   * stanze simili e si prevedono gli aumenti al rinnovo.
+   *
+   * `apartment`: il canone dell'intero appartamento, da ripartire fra
+   * coinquilini secondo le metrature.
+   */
+  rentBasis: 'room' | 'apartment';
+  /** Canone mensile della tua stanza, in EUR (solo con `rentBasis: 'room'`). */
+  roomRent: number | null;
+  /**
+   * Il contratto riguarda solo la tua stanza oppure l'intero appartamento,
+   * firmato insieme ai coinquilini. Cambia la base dell'imposta di registro
+   * e il suo minimo, che vale per contratto.
+   */
+  contractScope: 'room' | 'apartment';
+  /** Numero di bagni dell'appartamento, se lo conosci. */
+  bathrooms: number | null;
+  /** Classe energetica dell'appartamento, se la conosci. */
+  energyClass: EnergyClass | null;
+  /**
+   * Quanto pagano in media stanze simili alla tua (stessa zona, metratura e
+   * servizi), se lo sai: per esempio i coinquilini o i compagni di corso.
+   * È il confronto più affidabile e sostituisce la stima automatica.
+   */
+  comparableRent: number | null;
+  /**
+   * Correzione della stima automatica per ciò che la media della città non
+   * vede (classe energetica, bagni, stato della casa), in frazione. `null`
+   * usa la correzione proposta dall'applicazione.
+   */
+  qualityAdjustment: number | null;
   /** Metratura della camera che occupi, in m². */
   roomSqm: number;
   /**
@@ -203,6 +241,24 @@ export interface HousingConfig {
   highTensionMunicipality: boolean;
   /** Spese condominiali mensili in EUR. */
   condoFees: number;
+  /**
+   * Mese di inizio del contratto attuale, `YYYY-MM`. Serve a sapere quando
+   * cadono gli anniversari (scatto ISTAT, imposta di registro) e il prossimo
+   * rinnovo. `null` significa che il contratto inizia adesso.
+   */
+  contractStart: string | null;
+  /**
+   * Durata di ciascun contratto in anni, per i tipi in cui la sceglie chi
+   * firma: da sei mesi a tre anni per gli studenti, fino a diciotto mesi per
+   * il transitorio. `null` usa il valore tipico.
+   */
+  contractYears: number | null;
+  /**
+   * Quota del divario rispetto al prezzo di mercato che il proprietario
+   * recupera a ogni rinnovo, in frazione (0 = nessun aumento oltre
+   * l'inflazione, 1 = subito al prezzo di mercato).
+   */
+  renewalCatchUp: number;
 }
 
 /**
@@ -343,6 +399,11 @@ export interface Attribution {
   fromOverride: number;
   /** Contributo di effetti contrattuali (scatti e reset del canone), in EUR. */
   fromContract: number;
+  /**
+   * Contributo del riallineamento al prezzo delle stanze simili ai rinnovi
+   * del contratto, in EUR. Valorizzato solo per chi affitta una stanza.
+   */
+  fromMarketGap: number;
 }
 
 export interface CategoryYearProjection {
@@ -375,6 +436,8 @@ export interface CategoryYearProjection {
 
 export interface ProjectionEvent {
   year: number;
+  /** Mese dell'evento, `YYYY-MM`, quando è noto. */
+  month?: string;
   kind:
     | 'istat_step'
     | 'contract_renewal'
@@ -482,9 +545,68 @@ export interface MonthProjection {
   charges: { label: string; amount: number; income?: boolean }[];
 }
 
+/**
+ * Stima del prezzo di mercato di una stanza simile alla tua.
+ *
+ * Ogni passaggio della stima è esposto, con la sua natura: un dato
+ * pubblicato, una derivazione da dati, oppure un'ipotesi dichiarata.
+ */
+export interface RoomBenchmark {
+  /** Canone mensile stimato per una stanza come la tua, oggi, in EUR. */
+  central: number;
+  /** Intervallo plausibile della stima, in EUR. */
+  lo: number;
+  hi: number;
+  /**
+   * `dato`: media pubblicata per la città; `derivato`: ricavato dal canone
+   * al metro quadro del comune; `tuo`: il canone di stanze simili inserito
+   * da te.
+   */
+  basis: 'dato' | 'derivato' | 'tuo';
+  steps: {
+    label: string;
+    /** Importo dopo il passaggio, in EUR. */
+    value: number;
+    kind: 'dato' | 'derivato' | 'ipotesi' | 'tuo';
+    note?: string;
+  }[];
+  /** Fonte e periodo del dato di partenza. */
+  source: string;
+}
+
+/** Un rinnovo del contratto e il canone previsto dopo. */
+export interface RentRenewal {
+  /** Mese del rinnovo, `YYYY-MM`. */
+  month: string;
+  /** Canone mensile a tuo carico prima del rinnovo, in EUR. */
+  from: number;
+  /** Canone previsto dopo il rinnovo, in EUR. */
+  to: number;
+  /** Se il proprietario non recupera nulla del divario. */
+  toLo: number;
+  /** Se il proprietario porta subito il canone al prezzo di mercato. */
+  toHi: number;
+  /** Prezzo di mercato stimato in quel momento, in EUR. */
+  market: number | null;
+}
+
+/** Il tuo affitto rispetto al mercato, e gli aumenti attesi. */
+export interface RentOutlook {
+  basis: 'room' | 'apartment';
+  /** Canone mensile a tuo carico oggi, in EUR. */
+  currentRent: number;
+  benchmark: RoomBenchmark | null;
+  /** Scostamento del mercato dal tuo canone: 0,2 = il mercato chiede il 20% in più. */
+  gap: number | null;
+  catchUp: number;
+  renewals: RentRenewal[];
+}
+
 export interface ProjectionResult {
   profileId: string;
   profileName: string;
+  /** Il tuo affitto rispetto al mercato e i rinnovi attesi; `null` se non affitti. */
+  rentOutlook: RentOutlook | null;
   /** Scomposizione mese per mese dei periodi. */
   months: MonthProjection[];
   /** Patrimonio di partenza, in EUR: il punto da cui parte la curva. */

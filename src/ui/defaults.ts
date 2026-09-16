@@ -6,12 +6,14 @@
  * mostri qualcosa di sensato al primo avvio, e vanno sostituiti con i propri.
  */
 
+import { DEFAULT_RENEWAL_CATCH_UP } from '../core/rent.js';
 import { MONTHLY } from '../core/schedule.js';
 import type {
   CategoryId,
   ExpenseItem,
   ExpenseSchedule,
   Profile,
+  SharingConfig,
 } from '../core/types.js';
 
 /** Colori dei profili: slot categoriali 1-3, validati per daltonismo. */
@@ -88,6 +90,9 @@ export function makeDefaultProfile(index = 0): Profile {
       highTensionMunicipality: true,
       condoFees: 60,
       sharing: null,
+      contractStart: null,
+      contractYears: null,
+      renewalCatchUp: DEFAULT_RENEWAL_CATCH_UP,
     },
     utilities: [
       item('u-energia', 'Elettricità e gas', 'utilities', 110),
@@ -120,6 +125,27 @@ export function makeDefaultProfile(index = 0): Profile {
   };
 }
 
+/**
+ * Coabitazione appena attivata. Di norma si conosce il canone della propria
+ * stanza, non quello dell'intero appartamento: e' il punto di partenza.
+ */
+export function newSharing(rentBasis: SharingConfig['rentBasis'] = 'room'): SharingConfig {
+  return {
+    rentBasis,
+    roomRent: null,
+    contractScope: 'room',
+    bathrooms: null,
+    energyClass: null,
+    comparableRent: null,
+    qualityAdjustment: null,
+    roomSqm: 14,
+    roomShared: false,
+    bedroomsSqm: 42,
+    occupants: 3,
+    onContract: true,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Persistenza locale
 // ---------------------------------------------------------------------------
@@ -146,6 +172,23 @@ export function loadState(): StoredState | null {
     // al primo aggiornamento dell'applicazione.
     for (const p of parsed.profiles) {
       if (p.housing && p.housing.sharing === undefined) p.housing.sharing = null;
+      if (p.housing) {
+        // Prima di inizio contratto e rinnovi: il contratto parte oggi.
+        if (p.housing.contractStart === undefined) p.housing.contractStart = null;
+        if (p.housing.contractYears === undefined) p.housing.contractYears = null;
+        if (p.housing.renewalCatchUp === undefined) {
+          p.housing.renewalCatchUp = DEFAULT_RENEWAL_CATCH_UP;
+        }
+        // Prima della modalita' stanza la coabitazione partiva sempre dal
+        // canone dell'intero appartamento.
+        if (p.housing.sharing && p.housing.sharing.rentBasis === undefined) {
+          p.housing.sharing = {
+            ...newSharing('apartment'),
+            ...p.housing.sharing,
+            rentBasis: 'apartment',
+          };
+        }
+      }
       // `realGrowth` (crescita reale aggiuntiva) e' stato sostituito da un
       // override esplicito del tasso di crescita: i vecchi valori non hanno
       // un equivalente diretto, quindi si torna alla previsione del modello.

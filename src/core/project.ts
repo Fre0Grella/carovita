@@ -14,7 +14,13 @@ import {
   uncertaintyBand,
   type RateDecomposition,
 } from './model.js';
-import { buildRentSchedule, computeShare, contractLabel } from './rent.js';
+import {
+  buildRentSchedule,
+  computeShare,
+  contractLabel,
+  type RentYear,
+} from './rent.js';
+import { roomBenchmark } from './rooms.js';
 import { calendarMonth, chargesAt, isFixedNominal } from './schedule.js';
 import { monthIndex, monthLabel, shortMonthLabel } from './series.js';
 import type {
@@ -29,6 +35,8 @@ import type {
   Profile,
   ProjectionEvent,
   ProjectionResult,
+  RentOutlook,
+  RoomBenchmark,
   ScenarioSettings,
   YearProjection,
 } from './types.js';
@@ -152,7 +160,9 @@ export function project(
         'viene stimato sull’indice generale dei prezzi al consumo.',
     );
   }
-  const foiRates: number[] = [0];
+  // L'indice 0 vale per gli anniversari che cadono nei prossimi dodici mesi,
+  // quando il contratto e' iniziato prima di oggi: si usa l'ultimo dato.
+  const foiRates: number[] = [forecastRate(foiModel, anchor, 0).total];
   for (let h = 1; h <= horizon; h++) {
     foiRates.push(forecastRate(foiModel, anchor, h).total);
   }
@@ -170,15 +180,43 @@ export function project(
   for (const w of computeShare(profile.housing).warnings) {
     if (!warnings.includes(w)) warnings.push(w);
   }
-  const initialRent = resolveInitialRent(profile, snapshot, warnings);
-  const rentSchedule = buildRentSchedule({
+  // Per chi affitta una stanza: quanto costano stanze simili. E' il livello
+  // verso cui il proprietario tende a riportare il canone ai rinnovi.
+  const city = snapshot.cities.find((c) => c.istatCode === profile.housing.istatCode);
+  const benchmark =
+    profile.housing.contractType === 'proprieta'
+      ? null
+      : roomBenchmark(
+          profile.housing,
+          city?.eurM2Month.semicentro ?? null,
+          city?.comune,
+        );
+  const initialRent = resolveInitialRent(profile, snapshot, warnings, benchmark);
+  const scheduleInput = {
     periods,
     housing: profile.housing,
     initialMonthlyRent: initialRent,
     marketIndex,
     foiRates,
     condoIndex,
-  });
+    benchmark: benchmark?.central ?? null,
+  };
+  const rentSchedule = buildRentSchedule(scheduleInput);
+  // Scenari del comportamento del proprietario: nessun recupero del divario,
+  // oppure subito al prezzo alto della stima. Diventano la banda della voce.
+  const rentLow: RentYear[] | null = benchmark
+    ? buildRentSchedule({ ...scheduleInput, catchUp: 0 })
+    : null;
+  const rentHigh: RentYear[] | null = benchmark
+    ? buildRentSchedule({ ...scheduleInput, benchmark: benchmark.hi, catchUp: 1 })
+    : null;
+  const rentOutlook = buildRentOutlook(
+    profile,
+    rentSchedule,
+    rentLow,
+    rentHigh,
+    benchmark,
+  );
 
   // --- Calendario ------------------------------------------------------------
   // Ogni periodo annuale occupa un blocco di mesi consecutivi. I mesi servono
@@ -295,8 +333,17 @@ export function project(
         h,
       );
       // Lo scarto residuo fra canone di mercato e canone contrattuale e'
-      // l'effetto delle regole del contratto.
-      split.fromContract = contractual - naive;
+      // l'effetto delle regole del contratto. Per una stanza se ne separa la
+      // parte dovuta al riallineamento ai prezzi delle stanze simili: e' la
+      // differenza con lo scenario in cui il proprietario non recupera nulla.
+      const low = rentLow?.[h];
+      const high = rentHigh?.[h];
+      if (low) {
+        split.fromMarketGap = contractual - low.total;
+        split.fromContract = low.total - naive;
+      } else {
+        split.fromContract = contractual - naive;
+      }
 
       categories.push({
         category: 'rent',
@@ -304,34 +351,34 @@ export function project(
         year,
         nominal: contractual,
         real: contractual / priceLevel,
-        lo: contractual * rentBand.lo,
-        hi: contractual * rentBand.hi,
+        lo: (low?.total ?? contractual) * rentBand.lo,
+        hi: (high?.total ?? contractual) * rentBand.hi,
         attribution: split,
         rate: rentDecomp.total,
         itemId: null,
         schedule: null,
         unitBase: base0.monthlyRent,
-        unitAmount: rentYear.monthlyRent,
+        unitAmount: rentYear.monthlyRentEnd,
       });
 
-      // Canone e condominio si pagano ogni mese; le imposte del contratto
-      // una volta l'anno, alla ricorrenza, che coincide con l'inizio del
-      // periodo.
-      const perMonth = (rentYear.annualRent + rentYear.condoFees) / period.months;
-      const taxes = rentYear.registrationTax + rentYear.stampDuty;
+      // Mese per mese: canone e condominio ogni mese, le imposte del
+      // contratto nel mese dell'anniversario, gli aumenti dal mese del rinnovo.
+      const monthTotal = (m: RentYear['months'][number]): number =>
+        m.rent + m.condo + m.taxes;
       for (let k = 0; k < period.months; k++) {
-        const amount = perMonth + (k === 0 ? taxes : 0);
+        const m = rentYear.months[k]!;
+        const amount = monthTotal(m);
         entries[k]!.push({
           nominal: amount,
-          lo: amount * rentBand.lo,
-          hi: amount * rentBand.hi,
+          lo: (low ? monthTotal(low.months[k]!) : amount) * rentBand.lo,
+          hi: (high ? monthTotal(high.months[k]!) : amount) * rentBand.hi,
         });
-      }
-      if (taxes > 0.5) {
-        charges[0]!.push({
-          label: 'Imposte del contratto d’affitto',
-          amount: taxes,
-        });
+        if (m.taxes > 0.5) {
+          charges[k]!.push({
+            label: 'Imposte del contratto d’affitto',
+            amount: m.taxes,
+          });
+        }
       }
     }
 
@@ -489,6 +536,7 @@ export function project(
     startMonth: periods[0]!.startMonth,
     endMonth: periods[periods.length - 1]!.endMonth,
     baseYear,
+    rentOutlook,
     months,
     initialSavings: profile.initialSavings,
     years,
@@ -526,6 +574,7 @@ function splitAttribution(
     fromPersistence: 0,
     fromOverride: 0,
     fromContract: 0,
+    fromMarketGap: 0,
   };
   if (h === 0) return empty;
 
@@ -544,23 +593,78 @@ function splitAttribution(
     fromPersistence: (delta * rate.persistence) / denom,
     fromOverride: 0,
     fromContract: 0,
+    fromMarketGap: 0,
   };
 }
 
 /**
- * Determina il canone iniziale dell'**intera** abitazione: se l'utente non lo
- * specifica, lo stima dal costo medio al metro quadro della citta' e della
- * zona scelte. La ripartizione fra coinquilini avviene piu' a valle, in
- * `buildRentSchedule`, perche' alcune regole (il minimo dell'imposta di
- * registro) vivono a livello di contratto.
+ * Riassume il tuo affitto rispetto al mercato e i rinnovi attesi, con per
+ * ciascuno il canone previsto e gli estremi fra «il proprietario non recupera
+ * nulla» e «porta subito il canone al prezzo alto delle stanze simili».
+ */
+function buildRentOutlook(
+  profile: Profile,
+  central: RentYear[],
+  low: RentYear[] | null,
+  high: RentYear[] | null,
+  benchmark: RoomBenchmark | null,
+): RentOutlook | null {
+  const housing = profile.housing;
+  if (housing.contractType === 'proprieta') return null;
+  const currentRent = central[0]?.monthlyRent ?? 0;
+  if (currentRent <= 0) return null;
+
+  const flat = (sched: RentYear[] | null) =>
+    sched ? sched.flatMap((y) => y.renewals) : [];
+  const lows = flat(low);
+  const highs = flat(high);
+
+  return {
+    basis: housing.sharing?.rentBasis === 'room' ? 'room' : 'apartment',
+    currentRent,
+    benchmark,
+    gap: benchmark ? benchmark.central / currentRent - 1 : null,
+    catchUp: housing.renewalCatchUp,
+    renewals: flat(central).map((r) => {
+      const lo = lows.find((x) => x.month === r.month);
+      const hi = highs.find((x) => x.month === r.month);
+      return {
+        month: r.month,
+        from: r.from,
+        to: r.to,
+        toLo: Math.min(r.to, lo?.to ?? r.to),
+        toHi: Math.max(r.to, hi?.to ?? r.to),
+        market: benchmark ? r.market : null,
+      };
+    }),
+  };
+}
+
+/**
+ * Determina il canone iniziale del contratto: quello della stanza se l'utente
+ * conosce quello, altrimenti quello dell'**intera** abitazione. Se manca, lo
+ * stima dal prezzo delle stanze simili o dal costo medio al metro quadro. La
+ * ripartizione fra coinquilini avviene piu' a valle, in `buildRentSchedule`,
+ * perche' alcune regole (il minimo dell'imposta di registro) vivono a livello
+ * di contratto.
  */
 export function resolveInitialRent(
   profile: Profile,
   snapshot: DataSnapshot,
   warnings: string[],
+  benchmark: RoomBenchmark | null = null,
 ): number {
   const h = profile.housing;
   if (h.contractType === 'proprieta') return 0;
+  if (h.sharing?.rentBasis === 'room') {
+    const roomRent = h.sharing.roomRent;
+    if (roomRent !== null && roomRent > 0) return roomRent;
+    warnings.push(
+      'Canone della stanza non inserito: uso il prezzo stimato delle ' +
+        'stanze simili.',
+    );
+    return benchmark?.central ?? 0;
+  }
   if (h.monthlyRent !== null && h.monthlyRent > 0) return h.monthlyRent;
 
   const city = snapshot.cities.find((c) => c.istatCode === h.istatCode);
