@@ -2,7 +2,7 @@
 
 Generato automaticamente da `npm run backtest`. Non modificare a mano.
 
-Snapshot del 2026-09-18, dati fino a 2026-08.
+Snapshot del 2026-10-03, dati fino a 2026-09.
 
 ## Come si legge
 
@@ -27,8 +27,8 @@ Un modello utile deve battere entrambi, soprattutto sugli orizzonti lunghi che s
 | Mobili e articoli per la casa | 1.56 | 1.60 | 1.75 | si | si |
 | Affitti di mercato | 1.61 | 1.76 | 1.48 | si | no |
 | Tempo libero, sport e cultura | 1.67 | 1.85 | 1.73 | si | si |
-| Indice generale dei prezzi al consumo | 1.78 | 2.45 | 1.77 | si | no |
 | Acqua e servizi per l’abitazione | 1.93 | 2.06 | 1.10 | si | no |
+| Indice generale dei prezzi al consumo | 2.07 | 2.69 | 2.06 | si | no |
 | Alimentari | 2.20 | 2.88 | 2.18 | si | no |
 | Assicurazioni e servizi finanziari | 2.26 | 2.21 | 1.40 | no | no |
 | Telefonia, internet e informazione | 2.69 | 3.05 | 5.04 | si | si |
@@ -53,16 +53,16 @@ Media e mediana su tutte le categorie, per anni di distanza dalla previsione. La
 
 | Orizzonte | MAE modello | MAE RW | MAE ancora | Mediana modello | Mediana RW | Copertura tasso | **Copertura livello** | Errore livello |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1 anno | 2.67 | 3.14 | 2.69 | 1.50 | 1.53 | 75.82% | **82.68%** | 2.56% |
-| 2 anni | 2.73 | 3.87 | 2.70 | 1.69 | 1.82 | 73.01% | **75.78%** | 4.44% |
-| 3 anni | 2.78 | 3.87 | 2.78 | 1.69 | 2.41 | 69.12% | **75.00%** | 5.98% |
-| 4 anni | 2.72 | 3.63 | 2.76 | 1.74 | 2.21 | 64.31% | **73.33%** | 7.16% |
-| 5 anni | 2.87 | 3.24 | 2.83 | 1.86 | 2.06 | 63.03% | **67.65%** | 7.96% |
-| 6 anni | 2.99 | 3.68 | 2.90 | 1.93 | 2.58 | 62.90% | **62.90%** | 9.55% |
-| 7 anni | 3.00 | 3.83 | 2.92 | 1.84 | 2.41 | 64.22% | **64.22%** | 10.95% |
-| 8 anni | 3.08 | 4.19 | 3.01 | 1.89 | 2.65 | 64.17% | **63.10%** | 12.31% |
-| 9 anni | 3.12 | 3.76 | 3.09 | 2.02 | 2.62 | 62.35% | **65.88%** | 13.57% |
-| 10 anni | 3.25 | 3.80 | 3.23 | 1.97 | 2.65 | 60.78% | **65.36%** | 14.46% |
+| 1 anno | 2.68 | 3.15 | 2.71 | 1.69 | 1.53 | 74.51% | **82.03%** | 2.57% |
+| 2 anni | 2.76 | 3.89 | 2.72 | 1.69 | 1.82 | 71.97% | **75.43%** | 4.46% |
+| 3 anni | 2.80 | 3.88 | 2.80 | 1.81 | 2.41 | 68.38% | **75.00%** | 6.01% |
+| 4 anni | 2.73 | 3.64 | 2.77 | 1.84 | 2.21 | 63.92% | **72.94%** | 7.17% |
+| 5 anni | 2.88 | 3.26 | 2.84 | 2.03 | 2.07 | 61.76% | **67.65%** | 7.96% |
+| 6 anni | 3.01 | 3.70 | 2.92 | 2.12 | 2.59 | 62.44% | **64.25%** | 9.56% |
+| 7 anni | 3.02 | 3.86 | 2.94 | 2.12 | 2.41 | 63.73% | **64.22%** | 10.95% |
+| 8 anni | 3.09 | 4.21 | 3.03 | 2.14 | 2.65 | 63.64% | **63.64%** | 12.31% |
+| 9 anni | 3.14 | 3.77 | 3.11 | 2.08 | 2.62 | 61.76% | **65.88%** | 13.57% |
+| 10 anni | 3.28 | 3.81 | 3.25 | 2.16 | 2.65 | 59.48% | **65.36%** | 14.46% |
 
 Le colonne di copertura indicano la quota di casi in cui il valore reale è caduto nella banda dichiarata all’80%. Un modello ben calibrato sta vicino a 80: molto sotto significa bande troppo strette (falsa sicurezza), molto sopra bande troppo larghe.
 
@@ -89,7 +89,7 @@ La ragione è strutturale e non si elimina con un modello di questa famiglia: in
 | Alimentari | 0.32 | 0.08 | 1.20 | 29 |
 | Salute | 0.31 | 0.01 | 1.19 | 29 |
 | Manutenzione dell’abitazione | 0.69 | 0.00 | 2.59 | 29 |
-| Indice generale dei prezzi al consumo | 0.38 | 0.00 | 3.22 | 29 |
+| Indice generale dei prezzi al consumo | 0.41 | 0.00 | 4.07 | 29 |
 | Affitti di mercato | 0.69 | -0.00 | 3.39 | 29 |
 | Cura della persona e altre spese | 0.51 | -0.02 | 2.81 | 29 |
 | Tempo libero, sport e cultura | 0.50 | -0.03 | -0.48 | 29 |
