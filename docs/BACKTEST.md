@@ -2,7 +2,7 @@
 
 Generato automaticamente da `npm run backtest`. Non modificare a mano.
 
-Snapshot del 2026-10-03, dati fino a 2026-09.
+Snapshot del 2026-10-18, dati fino a 2026-09.
 
 ## Come si legge
 
@@ -19,25 +19,25 @@ Un modello utile deve battere entrambi, soprattutto sugli orizzonti lunghi che s
 
 | Categoria | MAE modello | MAE RW | MAE ancora | Meglio di RW | Meglio di ancora |
 |---|---:|---:|---:|:--:|:--:|
-| Cura della persona e altre spese | 0.87 | 1.44 | 0.90 | si | si |
-| Manutenzione dell’abitazione | 1.09 | 1.41 | 0.99 | si | no |
-| Salute | 1.35 | 1.57 | 1.12 | si | no |
-| Abbigliamento e calzature | 1.48 | 2.58 | 1.70 | si | si |
-| Ristorazione e alloggio | 1.56 | 1.87 | 1.57 | si | si |
-| Mobili e articoli per la casa | 1.56 | 1.60 | 1.75 | si | si |
-| Affitti di mercato | 1.61 | 1.76 | 1.48 | si | no |
-| Tempo libero, sport e cultura | 1.67 | 1.85 | 1.73 | si | si |
-| Acqua e servizi per l’abitazione | 1.93 | 2.06 | 1.10 | si | no |
-| Indice generale dei prezzi al consumo | 2.07 | 2.69 | 2.06 | si | no |
-| Alimentari | 2.20 | 2.88 | 2.18 | si | no |
-| Assicurazioni e servizi finanziari | 2.26 | 2.21 | 1.40 | no | no |
-| Telefonia, internet e informazione | 2.69 | 3.05 | 5.04 | si | si |
-| Istruzione | 2.90 | 3.96 | 2.78 | si | no |
-| Carburante ed esercizio del veicolo | 4.50 | 6.06 | 4.43 | si | no |
-| Trasporto pubblico | 6.05 | 8.85 | 5.58 | si | no |
-| Elettricità, gas e altri combustibili | 14.16 | 17.35 | 13.65 | si | no |
+| Cura della persona e altre spese | 0.92 | 1.53 | 0.97 | si | si |
+| Manutenzione dell’abitazione | 1.12 | 1.46 | 1.05 | si | no |
+| Salute | 1.31 | 1.63 | 1.13 | si | no |
+| Tempo libero, sport e cultura | 1.37 | 1.67 | 1.47 | si | si |
+| Abbigliamento e calzature | 1.47 | 1.74 | 1.57 | si | si |
+| Affitti di mercato | 1.54 | 1.74 | 1.45 | si | no |
+| Mobili e articoli per la casa | 1.55 | 1.70 | 1.78 | si | si |
+| Ristorazione e alloggio | 1.74 | 2.18 | 1.76 | si | si |
+| Acqua e servizi per l’abitazione | 1.84 | 2.03 | 1.05 | si | no |
+| Alimentari | 2.06 | 2.88 | 2.06 | si | si |
+| Indice generale dei prezzi al consumo | 2.07 | 2.70 | 2.07 | si | no |
+| Assicurazioni e servizi finanziari | 2.30 | 2.26 | 1.45 | no | no |
+| Telefonia, internet e informazione | 2.65 | 3.06 | 4.98 | si | si |
+| Istruzione | 2.87 | 3.89 | 2.79 | si | no |
+| Trasporto pubblico | 4.73 | 6.84 | 4.55 | si | no |
+| Carburante ed esercizio del veicolo | 5.03 | 6.68 | 4.99 | si | no |
+| Elettricità, gas e altri combustibili | 14.48 | 17.52 | 13.95 | si | no |
 
-Il modello batte il random walk in **16/17** categorie e l’ancora fissa in **6/17**.
+Il modello batte il random walk in **16/17** categorie e l’ancora fissa in **7/17**.
 
 ### Come interpretare il confronto con l’ancora fissa
 
@@ -53,16 +53,16 @@ Media e mediana su tutte le categorie, per anni di distanza dalla previsione. La
 
 | Orizzonte | MAE modello | MAE RW | MAE ancora | Mediana modello | Mediana RW | Copertura tasso | **Copertura livello** | Errore livello |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1 anno | 2.68 | 3.15 | 2.71 | 1.69 | 1.53 | 74.51% | **82.03%** | 2.57% |
-| 2 anni | 2.76 | 3.89 | 2.72 | 1.69 | 1.82 | 71.97% | **75.43%** | 4.46% |
-| 3 anni | 2.80 | 3.88 | 2.80 | 1.81 | 2.41 | 68.38% | **75.00%** | 6.01% |
-| 4 anni | 2.73 | 3.64 | 2.77 | 1.84 | 2.21 | 63.92% | **72.94%** | 7.17% |
-| 5 anni | 2.88 | 3.26 | 2.84 | 2.03 | 2.07 | 61.76% | **67.65%** | 7.96% |
-| 6 anni | 3.01 | 3.70 | 2.92 | 2.12 | 2.59 | 62.44% | **64.25%** | 9.56% |
-| 7 anni | 3.02 | 3.86 | 2.94 | 2.12 | 2.41 | 63.73% | **64.22%** | 10.95% |
-| 8 anni | 3.09 | 4.21 | 3.03 | 2.14 | 2.65 | 63.64% | **63.64%** | 12.31% |
-| 9 anni | 3.14 | 3.77 | 3.11 | 2.08 | 2.62 | 61.76% | **65.88%** | 13.57% |
-| 10 anni | 3.28 | 3.81 | 3.25 | 2.16 | 2.65 | 59.48% | **65.36%** | 14.46% |
+| 1 anno | 2.60 | 3.07 | 2.65 | 1.45 | 1.57 | 72.22% | **79.08%** | 2.48% |
+| 2 anni | 2.71 | 3.77 | 2.67 | 1.49 | 1.79 | 70.93% | **75.43%** | 4.36% |
+| 3 anni | 2.74 | 3.85 | 2.75 | 1.64 | 2.15 | 67.65% | **75.37%** | 5.82% |
+| 4 anni | 2.68 | 3.49 | 2.75 | 1.79 | 2.10 | 63.92% | **70.98%** | 6.99% |
+| 5 anni | 2.82 | 3.14 | 2.81 | 1.93 | 2.09 | 60.08% | **65.13%** | 7.75% |
+| 6 anni | 2.92 | 3.58 | 2.88 | 2.07 | 2.17 | 61.09% | **62.90%** | 9.23% |
+| 7 anni | 2.95 | 3.85 | 2.90 | 2.09 | 2.19 | 61.27% | **60.29%** | 10.47% |
+| 8 anni | 3.03 | 4.07 | 3.01 | 2.10 | 2.54 | 64.71% | **60.96%** | 11.94% |
+| 9 anni | 3.11 | 3.77 | 3.12 | 2.04 | 2.50 | 62.35% | **62.35%** | 13.07% |
+| 10 anni | 3.29 | 3.58 | 3.31 | 2.07 | 2.66 | 56.86% | **60.13%** | 13.85% |
 
 Le colonne di copertura indicano la quota di casi in cui il valore reale è caduto nella banda dichiarata all’80%. Un modello ben calibrato sta vicino a 80: molto sotto significa bande troppo strette (falsa sicurezza), molto sopra bande troppo larghe.
 
@@ -80,20 +80,20 @@ La ragione è strutturale e non si elimina con un modello di questa famiglia: in
 
 | Categoria | phi | spread (p.p.) | ultimo (%) | oss. |
 |---|---:|---:|---:|---:|
-| Assicurazioni e servizi finanziari | 0.45 | 1.28 | 2.08 | 29 |
-| Elettricità, gas e altri combustibili | 0.16 | 1.27 | 14.60 | 29 |
-| Acqua e servizi per l’abitazione | 0.53 | 1.23 | 3.29 | 29 |
-| Trasporto pubblico | 0.15 | 1.22 | -3.90 | 29 |
-| Ristorazione e alloggio | 0.65 | 0.46 | 3.14 | 29 |
-| Carburante ed esercizio del veicolo | 0.20 | 0.40 | 11.46 | 29 |
-| Alimentari | 0.32 | 0.08 | 1.20 | 29 |
-| Salute | 0.31 | 0.01 | 1.19 | 29 |
-| Manutenzione dell’abitazione | 0.69 | 0.00 | 2.59 | 29 |
-| Indice generale dei prezzi al consumo | 0.41 | 0.00 | 4.07 | 29 |
-| Affitti di mercato | 0.69 | -0.00 | 3.39 | 29 |
-| Cura della persona e altre spese | 0.51 | -0.02 | 2.81 | 29 |
-| Tempo libero, sport e cultura | 0.50 | -0.03 | -0.48 | 29 |
-| Mobili e articoli per la casa | 0.48 | -0.49 | 1.00 | 29 |
-| Istruzione | 0.32 | -0.63 | 1.40 | 29 |
-| Abbigliamento e calzature | 0.14 | -1.38 | 0.12 | 29 |
-| Telefonia, internet e informazione | 0.15 | -3.00 | 1.41 | 29 |
+| Elettricità, gas e altri combustibili | 0.16 | 1.32 | 19.34 | 29 |
+| Assicurazioni e servizi finanziari | 0.38 | 1.17 | 1.88 | 29 |
+| Acqua e servizi per l’abitazione | 0.53 | 1.16 | 3.49 | 29 |
+| Trasporto pubblico | 0.15 | 0.84 | -1.51 | 29 |
+| Ristorazione e alloggio | 0.56 | 0.42 | 3.20 | 29 |
+| Carburante ed esercizio del veicolo | 0.21 | 0.42 | 14.44 | 29 |
+| Alimentari | 0.34 | 0.04 | 1.79 | 29 |
+| Salute | 0.22 | 0.00 | 1.29 | 29 |
+| Indice generale dei prezzi al consumo | 0.41 | 0.00 | 4.17 | 29 |
+| Manutenzione dell’abitazione | 0.64 | -0.00 | 2.69 | 29 |
+| Affitti di mercato | 0.70 | -0.00 | 3.38 | 29 |
+| Cura della persona e altre spese | 0.56 | -0.05 | 2.69 | 29 |
+| Tempo libero, sport e cultura | 0.50 | -0.14 | 1.30 | 29 |
+| Mobili e articoli per la casa | 0.50 | -0.54 | 1.10 | 29 |
+| Istruzione | 0.31 | -0.69 | 1.39 | 29 |
+| Abbigliamento e calzature | 0.21 | -0.73 | 0.00 | 29 |
+| Telefonia, internet e informazione | 0.20 | -3.00 | 1.71 | 29 |
