@@ -2,7 +2,7 @@
 
 Generato automaticamente da `npm run backtest`. Non modificare a mano.
 
-Snapshot del 2026-10-18, dati fino a 2026-09.
+Snapshot del 2026-11-03, dati fino a 2026-09.
 
 ## Come si legge
 
